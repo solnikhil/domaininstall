@@ -1,0 +1,36 @@
+{
+  "name": "domaininstall",
+  "version": "0.0.1",
+  "description": "Install a package by domain name. The domain owner proves the mapping with a DNS TXT record; domaininstall resolves it, shows you exactly what will be installed, and hands off to your package manager.",
+  "type": "module",
+  "bin": {
+    "domaininstall": "dist/cli.js",
+    "dnstall": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "dns",
+    "install",
+    "package-manager",
+    "npm",
+    "typosquatting",
+    "provenance",
+    "dnslink",
+    "supply-chain"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}
