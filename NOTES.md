@@ -223,8 +223,9 @@ Follow-up (if he replies):
 ## 9. Update log (post-research build)
 
 ### Naming (decided)
-- npm package / brand: **`domaininstall`** (free on npm; matches repo).
-- CLI commands (bin): **`domaininstall`** + short alias **`dnstall`**.
+- npm package / brand: **`domaininstall`** (not publicly published yet; matches repo).
+- Primary CLI command: **`di`**. Descriptive/legacy aliases: **`domaininstall`** + **`dnstall`**.
+- The unscoped npm package name `di` is already owned by an unrelated dependency-injection project, so the install package remains `domaininstall` while its executable is `di`.
 - `dpm` was dropped — it's already taken on npm (dpm.fi). Any `_dpm`/`dpm=`
   references above are superseded by `_dnstall` / `dnstall=`.
 
@@ -260,8 +261,15 @@ Working CLI in the repo. Node 22 + TypeScript, ESM, **zero runtime deps**
 - `scripts/smoke.ts` — 19 checks passing, incl. **live DoH** + a **real
   `npm install`** handoff.
 
-Only untested path: full resolve→install against a real `_dnstall` record
-(none exist in the wild yet). Closeable by setting a record on `zuraai.in`.
+The live end-to-end test is `npm run test:e2e`. It expects:
+
+```dns
+_dnstall.zuraai.in.  TXT  "dnstall=pkg:npm/zuraai"
+```
+
+It runs the compiled `di` CLI, installs the vouched package into a temporary
+project, and verifies an isolated TOFU pin without touching the user's real
+`~/.domaininstall` state.
 
 ### Sam Whited replied (author of Go proposal #26160)
 He's a genuine kindred spirit — his [2017 post](https://blog.samwhited.com/2017/08/musings-on-the-future-of-go-package-management/)
