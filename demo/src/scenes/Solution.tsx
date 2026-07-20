@@ -56,7 +56,7 @@ export const Solution: React.FC<{ duration: number }> = ({ duration }) => {
             ...enter(frame, fps, 26, { y: 30, blur: 8 }),
           }}
         >
-          <Pill text="stripe.com" mono />
+          <Pill text="zuraai.xyz" mono />
           <div style={{ position: "relative", width: 90, height: 8 }}>
             <div
               style={{

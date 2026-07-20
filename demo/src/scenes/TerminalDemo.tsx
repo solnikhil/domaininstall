@@ -9,7 +9,7 @@ import { enter, exitFade } from "../anim";
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
-const CMD = "dnstall stripe.com";
+const CMD = "di zuraai.xyz";
 const TYPE_START = 16;
 const CPS = 1.5;
 const typeEnd = TYPE_START + Math.ceil(CMD.length / CPS);
@@ -17,11 +17,11 @@ const RESOLVE_START = typeEnd + 10;
 const RESOLVED = RESOLVE_START + 34;
 const SUMMARY = RESOLVED + 6;
 const rows = [
-  ["domain", "stripe.com"],
-  ["package", "stripe"],
+  ["domain", "zuraai.xyz"],
+  ["package", "zuraai"],
   ["version", "latest"],
   ["registry", "registry.npmjs.org"],
-  ["will run", "npm install stripe"],
+  ["will run", "npm install zuraai"],
 ];
 const PROMPT = SUMMARY + rows.length * 7 + 16;
 const TYPE_Y = PROMPT + 14;
@@ -76,16 +76,15 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
                 {resolving ? (
                   <>
                     <Spinner frame={frame} size={30} />
-                    <span>Resolving _dnstall.stripe.com …</span>
+                    <span>Resolving _dnstall.zuraai.xyz …</span>
                   </>
                 ) : (
                   <>
                     <CheckMark size={30} />
                     <span>
                       resolved via cloudflare-dns.com{"   "}
-                      <span style={{ color: colors.green, fontWeight: 500 }}>DNSSEC</span>
+                      <span style={{ color: colors.textDim, fontWeight: 500 }}>DNSSEC —</span>
                     </span>
-                    <CheckMark size={26} />
                   </>
                 )}
               </div>
@@ -127,8 +126,8 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
             {frame >= PROMPT && (
               <div style={{ marginTop: 24, display: "flex", gap: 14, alignItems: "center" }}>
                 <span>
-                  Install <span style={{ fontWeight: 700 }}>stripe</span> from{" "}
-                  <span style={{ fontWeight: 700 }}>stripe.com</span>?{" "}
+                  Install <span style={{ fontWeight: 700 }}>zuraai</span> from{" "}
+                  <span style={{ fontWeight: 700 }}>zuraai.xyz</span>?{" "}
                   <span style={{ color: colors.textDim }}>(y/N)</span>
                 </span>
                 <span style={{ color: colors.green }}>
@@ -160,7 +159,7 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
                     }}
                   >
                     <CheckMark size={36} />
-                    <span>Installed stripe from stripe.com</span>
+                    <span>Installed zuraai from zuraai.xyz</span>
                   </div>
                 )}
               </div>

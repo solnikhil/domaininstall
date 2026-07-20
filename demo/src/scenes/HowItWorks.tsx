@@ -12,7 +12,7 @@ export const HowItWorks: React.FC<{ duration: number }> = ({ duration }) => {
   const out = exitFade(frame, duration, 18);
 
   const steps = [
-    { label: "your domain", value: "stripe.com" },
+    { label: "your domain", value: "zuraai.xyz" },
     { label: "DNS-over-HTTPS", value: "TXT lookup" },
     { label: "the package", value: "stripe" },
   ];
@@ -55,10 +55,10 @@ export const HowItWorks: React.FC<{ duration: number }> = ({ duration }) => {
             maxWidth: 940,
           }}
         >
-          <span style={{ color: colors.textDim }}>_dnstall.stripe.com</span>
+          <span style={{ color: colors.textDim }}>_dnstall.zuraai.xyz</span>
           <span style={{ color: colors.yellow }}>TXT</span>
           <span style={{ color: colors.text }}>
-            "dnstall=<span style={{ color: colors.green }}>pkg:npm/stripe</span>"
+            "dnstall=<span style={{ color: colors.green }}>pkg:npm/zuraai</span>"
           </span>
         </div>
 

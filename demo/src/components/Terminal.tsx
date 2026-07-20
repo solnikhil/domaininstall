@@ -9,7 +9,7 @@ export const Terminal: React.FC<{
   minHeight?: number;
   style?: React.CSSProperties;
   children: React.ReactNode;
-}> = ({ title = "zsh — dnstall", width = 900, minHeight = 520, style, children }) => {
+}> = ({ title = "zsh — di", width = 900, minHeight = 520, style, children }) => {
   return (
     <div
       style={{
