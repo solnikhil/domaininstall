@@ -143,7 +143,7 @@ Two interfaces:
   `dpm <domain>` → DoH TXT lookup → parse DNSLink-style record → confirm →
   npm handoff. Plus `dpm verify <domain>` that diagnoses record problems
   (fixes the DNS-UX pain point). npm only, one shell.
-  Prove end-to-end on `zuraai.in`. **Deliverable: a 20-second demo clip.**
+  Prove end-to-end on `zuraai.xyz`. **Deliverable: a 20-second demo clip.**
 
 - **Phase 1 — Make it real.**
   Subdomain multi-package, multi-PM detection, metadata in records
@@ -167,7 +167,7 @@ Two interfaces:
   verified, no-arbitrary-code replacement for `curl | bash`.
 - **Content:** the "Go wanted this in 2018 and never shipped it / IPFS proved it"
   narrative → HN / Reddit / Lobsters.
-- **Seed supply yourself:** register `_dpm.zuraai.in` + a few friendly OSS
+- **Seed supply yourself:** register `_dpm.zuraai.xyz` + a few friendly OSS
   packages so the tool is useful on day one, not empty.
 
 ---
@@ -201,7 +201,7 @@ Follow-up (if he replies):
 
 - [ ] Confirm command name `dpm` + prefix `_dpm` (recommended).
 - [ ] Scaffold Phase 0 (CLI, DoH resolver, DNSLink-style parser, `verify`, npm handoff).
-- [ ] Set `_dpm.zuraai.in` TXT record and test the full loop live.
+- [x] Set `_dnstall.zuraai.xyz` TXT record and test the full loop live.
 - [ ] Record the 20-second demo clip.
 - [ ] Draft the record spec page (Phase 2).
 - [ ] Send the DM to Sam.
