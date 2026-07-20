@@ -6,7 +6,7 @@
  * pin. State is isolated from the user's real ~/.domaininstall directory.
  *
  * Required DNS record:
- *   _dnstall.zuraai.in  TXT  "dnstall=pkg:npm/zuraai"
+ *   _dnstall.zuraai.xyz  TXT  "dnstall=pkg:npm/zuraai"
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const domain = process.env.DOMAININSTALL_E2E_DOMAIN || "zuraai.in";
+const domain = process.env.DOMAININSTALL_E2E_DOMAIN || "zuraai.xyz";
 const expectedPackage = process.env.DOMAININSTALL_E2E_PACKAGE || "zuraai";
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 

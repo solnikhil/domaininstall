@@ -264,7 +264,7 @@ Working CLI in the repo. Node 22 + TypeScript, ESM, **zero runtime deps**
 The live end-to-end test is `npm run test:e2e`. It expects:
 
 ```dns
-_dnstall.zuraai.in.  TXT  "dnstall=pkg:npm/zuraai"
+_dnstall.zuraai.xyz.  TXT  "dnstall=pkg:npm/zuraai"
 ```
 
 It runs the compiled `di` CLI, installs the vouched package into a temporary

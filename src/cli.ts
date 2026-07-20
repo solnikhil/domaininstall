@@ -245,10 +245,10 @@ ${c.dim("USAGE")}
   dnstall <domain>                           legacy short alias
 
 ${c.dim("EXAMPLES")}
-  di zuraai.in                       install the package zuraai.in vouches for
+  di zuraai.xyz                      install the package zuraai.xyz vouches for
   di stripe.com/react                install the "react" sub-package
   di stripe.com@^18                  pin a version range
-  di verify zuraai.in                check the record without installing
+  di verify zuraai.xyz               check the record without installing
 
 ${c.dim("OPTIONS")}
   -y, --yes        skip the confirmation prompt (ignored if the mapping changed)
@@ -280,7 +280,7 @@ async function main(): Promise<number> {
   const [first, second] = positionals;
   if (first === "verify") {
     if (!second) {
-      error("verify needs a domain, e.g. `di verify zuraai.in`");
+      error("verify needs a domain, e.g. `di verify zuraai.xyz`");
       return 1;
     }
     return cmdVerify(second);
