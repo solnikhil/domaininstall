@@ -167,12 +167,8 @@ function printPinWarning(changes: PinChange[]): void {
   for (const ch of changes) {
     info(`    ${ch.field}: ${c.red(ch.was)} ${c.dim("→")} ${c.yellow(ch.now)}`);
   }
-  info(
-    c.dim(
-      "    A domain can change hands or be hijacked. Only continue if you\n" +
-        "    expected this change.",
-    ),
-  );
+  info(c.dim("    A domain can change hands or be hijacked. Only continue if you"));
+  info(c.dim("    expected this change."));
   info("");
 }
 
