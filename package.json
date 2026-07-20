@@ -4,6 +4,7 @@
   "description": "Install a package by domain name. The domain owner proves the mapping with a DNS TXT record; domaininstall resolves it, shows you exactly what will be installed, and hands off to your package manager.",
   "type": "module",
   "bin": {
+    "di": "dist/cli.js",
     "domaininstall": "dist/cli.js",
     "dnstall": "dist/cli.js"
   },
@@ -16,6 +17,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli.js",
+    "test": "npm run build && node --experimental-strip-types scripts/smoke.ts",
+    "test:e2e": "npm run build && node --experimental-strip-types scripts/e2e.ts",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

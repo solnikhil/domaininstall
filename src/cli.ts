@@ -3,9 +3,10 @@
  * domaininstall — install a package by domain name.
  *
  * Usage:
- *   domaininstall <domain>[/sub][@version]     resolve + confirm + install
- *   dnstall <domain>                           (short alias)
- *   domaininstall verify <domain>              diagnose the record, no install
+ *   di <domain>[/sub][@version]                resolve + confirm + install
+ *   domaininstall <domain>                     descriptive alias
+ *   dnstall <domain>                           legacy short alias
+ *   di verify <domain>                         diagnose the record, no install
  */
 
 import { resolveTxt } from "./doh.js";
@@ -235,18 +236,19 @@ async function cmdVerify(target: string): Promise<number> {
 }
 
 const HELP = `
-${c.bold("domaininstall")} — install a package by domain name
+${c.bold("di")} — install a package by domain name
 
 ${c.dim("USAGE")}
-  domaininstall <domain>[/sub][@version]     resolve, confirm, and install
-  dnstall <domain>                           short alias
-  domaininstall verify <domain>              diagnose the DNS record (no install)
+  di <domain>[/sub][@version]                resolve, confirm, and install
+  di verify <domain>                         diagnose the DNS record (no install)
+  domaininstall <domain>                     descriptive alias
+  dnstall <domain>                           legacy short alias
 
 ${c.dim("EXAMPLES")}
-  dnstall stripe.com                 install the package stripe.com vouches for
-  dnstall stripe.com/react           install the "react" sub-package
-  dnstall stripe.com@^18             pin a version range
-  dnstall verify stripe.com          check the record without installing
+  di zuraai.in                       install the package zuraai.in vouches for
+  di stripe.com/react                install the "react" sub-package
+  di stripe.com@^18                  pin a version range
+  di verify zuraai.in                check the record without installing
 
 ${c.dim("OPTIONS")}
   -y, --yes        skip the confirmation prompt (ignored if the mapping changed)
@@ -278,7 +280,7 @@ async function main(): Promise<number> {
   const [first, second] = positionals;
   if (first === "verify") {
     if (!second) {
-      error("verify needs a domain, e.g. `domaininstall verify stripe.com`");
+      error("verify needs a domain, e.g. `di verify zuraai.in`");
       return 1;
     }
     return cmdVerify(second);

@@ -28,7 +28,8 @@ export interface PinChange {
   now: string;
 }
 
-const DIR = join(homedir(), ".domaininstall");
+// Tests and managed environments can isolate state without repurposing HOME.
+const DIR = process.env.DOMAININSTALL_STATE_DIR || join(homedir(), ".domaininstall");
 const FILE = join(DIR, "pins.json");
 
 type PinStore = Record<string, Pin>;

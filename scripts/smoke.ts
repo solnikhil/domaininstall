@@ -10,7 +10,6 @@ import { join } from "node:path";
 import { resolveTxt } from "../dist/doh.js";
 import { parseRecord, parseRecords } from "../dist/record.js";
 import { validatePackageName, parseTarget, validateDomain } from "../dist/validate.js";
-import { diffPin, savePin } from "../dist/pin.js";
 import { detectPackageManager, buildInstallPlan, runInstall } from "../dist/install.js";
 
 let pass = 0;
@@ -26,6 +25,10 @@ function check(name: string, cond: boolean): void {
 }
 
 async function main() {
+  const state = mkdtempSync(join(tmpdir(), "dnstall-state-"));
+  process.env.DOMAININSTALL_STATE_DIR = state;
+  const { diffPin, savePin } = await import("../dist/pin.js");
+
   console.log("\n1. Record parsing (purl + legacy)");
   const p1 = parseRecord("dnstall=pkg:npm/stripe");
   check("purl: plain npm package", p1?.namespace === "npm" && p1?.package === "stripe");
@@ -81,6 +84,7 @@ async function main() {
   check("npm install exited 0", code === 0);
   check("package landed in node_modules", existsSync(join(proj, "node_modules", "is-number")));
   rmSync(proj, { recursive: true, force: true });
+  rmSync(state, { recursive: true, force: true });
 
   console.log(`\n${fail === 0 ? "\x1b[32m" : "\x1b[31m"}${pass} passed, ${fail} failed\x1b[0m\n`);
   process.exit(fail === 0 ? 0 : 1);
