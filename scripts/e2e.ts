@@ -51,15 +51,18 @@ async function main(): Promise<void> {
       throw new Error(`${expectedPackage} was not installed`);
     }
 
-    const pins = JSON.parse(readFileSync(join(state, "pins.json"), "utf8")) as Record<
-      string,
-      { package?: string }
-    >;
-    if (pins[domain]?.package !== expectedPackage) {
+    const store = JSON.parse(readFileSync(join(state, "pins.json"), "utf8")) as {
+      version?: number;
+      pins?: Record<string, { package?: string }>;
+    };
+    if (store.version !== 1 || store.pins?.[domain]?.package !== expectedPackage) {
       throw new Error(`expected a ${domain} -> ${expectedPackage} TOFU pin`);
     }
 
-    console.log(`\n✔ live E2E passed: ${domain} -> ${expectedPackage} -> npm install\n`);
+    const verifyCode = await run(process.execPath, [cli, "verify", domain], project, state);
+    if (verifyCode !== 0) throw new Error(`di verify exited with code ${verifyCode}`);
+
+    console.log(`\n✔ live E2E passed: ${domain} -> ${expectedPackage} -> npm install -> di verify\n`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

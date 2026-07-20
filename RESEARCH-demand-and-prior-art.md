@@ -1,5 +1,8 @@
 # domaininstall — Skeptical Demand & Prior-Art Research
 
+> **Historical market research.** This analysis remains useful background, but
+> current positioning and quantitative validation gates live in `ROADMAP.md`.
+
 > Honest, evidence-based assessment of whether "install a package by domain name,
 > verified via a DNS TXT record" has real demonstrated demand — or whether it's a
 > vitamin, not a painkiller. Written to be skeptical, not to cheerlead.

@@ -1,14 +1,10 @@
 /**
  * DNS-over-HTTPS TXT resolution.
  *
- * We resolve over DoH (rather than the system resolver) so a hostile local
- * network can't tamper with the lookup in transit. We query Cloudflare first,
- * then fall back to Google — both speak the same DoH JSON schema.
- *
- * DoH encrypts the query; it does NOT by itself prove authenticity. The `AD`
- * (Authenticated Data) flag tells us the upstream resolver DNSSEC-validated the
- * answer. We surface that as a trust badge, never as a hard gate (DNSSEC
- * deployment is still low).
+ * DoH protects transport to the resolver, while DNSSEC's AD bit reports
+ * authenticity validation. Resolver failures and authoritative negative
+ * answers are deliberately kept separate so callers never mistake an outage
+ * for proof that a domain has no record.
  */
 
 const DOH_PROVIDERS = [
@@ -16,93 +12,204 @@ const DOH_PROVIDERS = [
   "https://dns.google/resolve",
 ] as const;
 
-const TXT_TYPE = 16; // DNS TXT record type
+const TXT_TYPE = 16;
+
+export type DnsAttemptOutcome =
+  | "answer"
+  | "nodata"
+  | "nxdomain"
+  | "servfail"
+  | "refused"
+  | "timeout"
+  | "network_error"
+  | "http_error"
+  | "malformed"
+  | "dns_error";
+
+export type DnsOutcome = "answer" | "nodata" | "nxdomain" | "provider_exhaustion";
+
+export interface DnsAttempt {
+  provider: string;
+  outcome: DnsAttemptOutcome;
+  status?: number;
+}
 
 export interface TxtResult {
-  /** Logical TXT record values (multi-string chunks already concatenated). */
+  outcome: DnsOutcome;
   records: string[];
-  /** True if the resolver reported the answer as DNSSEC-authenticated. */
   authenticated: boolean;
-  /** DNS response status: 0 = NOERROR, 3 = NXDOMAIN. */
   status: number;
-  /** Which provider answered. */
   provider: string | null;
+  attempts: DnsAttempt[];
 }
 
-interface DohAnswer {
-  name: string;
-  type: number;
-  TTL?: number;
-  data: string;
+export interface ResolveTxtOptions {
+  providers?: readonly string[];
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }
 
-interface DohResponse {
-  Status: number;
-  AD?: boolean;
-  Answer?: DohAnswer[];
+interface ProviderResult {
+  attempt: DnsAttempt;
+  records: string[];
+  authenticated: boolean;
 }
 
-/**
- * A DoH JSON `data` field wraps each 255-byte character-string in quotes and
- * escapes inner quotes. Strip the wrapping quotes and join multiple strings
- * into one logical value (per the TXT record spec).
- */
 function normalizeTxtData(raw: string): string {
-  let s = raw.trim();
-  // Split into quoted chunks if present: "abc" "def" -> abcdef
+  const s = raw.trim();
   const chunks = s.match(/"(?:\\.|[^"\\])*"/g);
   if (chunks && chunks.length > 0) {
     return chunks
       .map((chunk) => chunk.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
       .join("");
   }
-  // No surrounding quotes — return as-is.
   return s;
 }
 
-async function queryProvider(provider: string, name: string): Promise<TxtResult | null> {
+function isTimeout(error: unknown): boolean {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
+function isDohResponse(value: unknown): value is {
+  Status: number;
+  AD?: boolean;
+  Answer?: Array<{ type: number; data: string }>;
+} {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.Status !== "number" || !Number.isInteger(candidate.Status)) return false;
+  if (candidate.AD !== undefined && typeof candidate.AD !== "boolean") return false;
+  if (candidate.Answer === undefined) return true;
+  if (!Array.isArray(candidate.Answer)) return false;
+  return candidate.Answer.every(
+    (answer) =>
+      typeof answer === "object" &&
+      answer !== null &&
+      typeof (answer as Record<string, unknown>).type === "number" &&
+      typeof (answer as Record<string, unknown>).data === "string",
+  );
+}
+
+async function queryProvider(
+  provider: string,
+  name: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<ProviderResult> {
   const url = `${provider}?name=${encodeURIComponent(name)}&type=TXT&do=1`;
-  let res: Response;
+  let response: Response;
   try {
-    res = await fetch(url, {
+    response = await fetchImpl(url, {
       headers: { accept: "application/dns-json" },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
-    return null; // network/timeout — let caller try the next provider
+  } catch (error) {
+    return {
+      attempt: { provider, outcome: isTimeout(error) ? "timeout" : "network_error" },
+      records: [],
+      authenticated: false,
+    };
   }
-  if (!res.ok) return null;
 
-  let json: DohResponse;
+  if (!response.ok) {
+    return {
+      attempt: { provider, outcome: "http_error", status: response.status },
+      records: [],
+      authenticated: false,
+    };
+  }
+
+  let json: unknown;
   try {
-    json = (await res.json()) as DohResponse;
+    json = await response.json();
   } catch {
-    return null;
+    return {
+      attempt: { provider, outcome: "malformed" },
+      records: [],
+      authenticated: false,
+    };
   }
 
-  const answers = Array.isArray(json.Answer) ? json.Answer : [];
-  const records = answers
-    .filter((a) => a.type === TXT_TYPE)
-    .map((a) => normalizeTxtData(a.data))
-    .sort(); // lexicographic sort for deterministic results (DNSLink convention)
+  if (!isDohResponse(json)) {
+    return {
+      attempt: { provider, outcome: "malformed" },
+      records: [],
+      authenticated: false,
+    };
+  }
 
+  const status = json.Status;
+  if (status === 2) {
+    return { attempt: { provider, outcome: "servfail", status }, records: [], authenticated: false };
+  }
+  if (status === 5) {
+    return { attempt: { provider, outcome: "refused", status }, records: [], authenticated: false };
+  }
+  if (status === 3) {
+    return {
+      attempt: { provider, outcome: "nxdomain", status },
+      records: [],
+      authenticated: json.AD === true,
+    };
+  }
+  if (status !== 0) {
+    return { attempt: { provider, outcome: "dns_error", status }, records: [], authenticated: false };
+  }
+
+  const answers = json.Answer ?? [];
+  const records = answers
+    .filter((answer) => answer.type === TXT_TYPE)
+    .map((answer) => normalizeTxtData(answer.data))
+    .sort();
   return {
+    attempt: { provider, outcome: records.length > 0 ? "answer" : "nodata", status },
     records,
     authenticated: json.AD === true,
-    status: typeof json.Status === "number" ? json.Status : -1,
-    provider,
   };
 }
 
 /**
- * Resolve TXT records for `_<prefix>.<domain>` via DoH.
- * Returns the first successful provider response.
+ * Resolve `_<prefix>.<domain>`. Authoritative answers (including NXDOMAIN and
+ * NODATA) stop resolution. Provider-local, transient, and malformed responses
+ * fall through to the next configured provider.
  */
-export async function resolveTxt(prefix: string, domain: string): Promise<TxtResult> {
+export async function resolveTxt(
+  prefix: string,
+  domain: string,
+  options: ResolveTxtOptions = {},
+): Promise<TxtResult> {
   const name = `_${prefix}.${domain}`;
-  for (const provider of DOH_PROVIDERS) {
-    const result = await queryProvider(provider, name);
-    if (result) return result;
+  const providers = options.providers ?? DOH_PROVIDERS;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const attempts: DnsAttempt[] = [];
+
+  for (const provider of providers) {
+    const result = await queryProvider(provider, name, fetchImpl, timeoutMs);
+    attempts.push(result.attempt);
+
+    if (
+      result.attempt.outcome === "answer" ||
+      result.attempt.outcome === "nodata" ||
+      result.attempt.outcome === "nxdomain"
+    ) {
+      return {
+        outcome: result.attempt.outcome,
+        records: result.records,
+        authenticated: result.authenticated,
+        status: result.attempt.status ?? -1,
+        provider,
+        attempts,
+      };
+    }
   }
-  return { records: [], authenticated: false, status: -1, provider: null };
+
+  return {
+    outcome: "provider_exhaustion",
+    records: [],
+    authenticated: false,
+    status: -1,
+    provider: null,
+    attempts,
+  };
 }

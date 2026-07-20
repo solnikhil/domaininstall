@@ -1,8 +1,9 @@
 # domaininstall — Project Notes
 
-> Working brainstorm + research log. Captures the concept, what the research
-> found, the design we've settled on, the roadmap, and open decisions.
-> Status: **pre-code / planning.** Nothing built yet.
+> **Historical research log.** Early sections retain the original `dpm`/`_dpm`
+> terminology and pre-code assumptions for context. Current product and execution
+> status live in `README.md` and `ROADMAP.md`; the update log below records later
+> naming and implementation decisions.
 
 ---
 

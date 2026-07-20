@@ -1,5 +1,9 @@
 # domaininstall — Security Design: Domain Expiry / Ownership Change / Revocation
 
+> **Historical design research.** Examples using `dpm`/`_dpm` predate the final
+> naming. Current security boundaries and release gates live in `SECURITY.md` and
+> `ROADMAP.md`.
+
 > Focused threat: a mapped domain **expires or changes ownership**, an attacker
 > re-registers it, repoints `_dpm.<domain>` at a malicious package, and hijacks
 > every `dpm <domain>` install. This doc surveys how comparable systems handle

@@ -118,3 +118,13 @@ export function parseRecords(rawRecords: string[], namespace?: string): DnstallR
     .filter((r): r is DnstallRecord => r !== null);
   return namespace ? parsed.filter((r) => r.namespace === namespace) : parsed;
 }
+
+/** Return one representative for each distinct install-relevant mapping. */
+export function distinctRecordMappings(records: DnstallRecord[]): DnstallRecord[] {
+  const mappings = new Map<string, DnstallRecord>();
+  for (const record of records) {
+    const key = JSON.stringify([record.namespace, record.package, record.version ?? null]);
+    if (!mappings.has(key)) mappings.set(key, record);
+  }
+  return [...mappings.values()];
+}

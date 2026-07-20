@@ -1,5 +1,9 @@
 # domaininstall — Technical Feasibility Research (2026)
 
+> **Historical research.** This document predates the final `di` command,
+> `_dnstall` record prefix, and current implementation. Use `README.md` and
+> `ROADMAP.md` for current behavior and execution status.
+
 > Focused research to confirm feasibility and pick libraries for the `dpm <domain>`
 > CLI. Scope: (1) DoH TXT resolution in Node, (2) client-side DNSSEC feasibility,
 > (3) package-manager detection + safe install, (4) version/record format design.

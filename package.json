@@ -1,7 +1,15 @@
 {
   "name": "domaininstall",
   "version": "0.0.1",
-  "description": "Install a package by domain name. The domain owner proves the mapping with a DNS TXT record; domaininstall resolves it, shows you exactly what will be installed, and hands off to your package manager.",
+  "description": "Install an npm package by domain name. The domain owner declares the mapping with DNS; domaininstall verifies continuity, previews the command, and installs with scripts disabled.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solnikhil/domaininstall.git"
+  },
+  "homepage": "https://github.com/solnikhil/domaininstall#readme",
+  "bugs": {
+    "url": "https://github.com/solnikhil/domaininstall/issues"
+  },
   "type": "module",
   "bin": {
     "di": "dist/cli.js",
@@ -12,13 +20,15 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.14.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli.js",
-    "test": "npm run build && node --experimental-strip-types scripts/smoke.ts",
+    "test": "npm run build && node --experimental-strip-types scripts/test.ts",
     "test:e2e": "npm run build && node --experimental-strip-types scripts/e2e.ts",
+    "test:all": "npm test && npm run test:e2e",
+    "verify:package": "npm run build && node --experimental-strip-types scripts/verify-package.ts",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -32,11 +42,11 @@
     "supply-chain"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0"
-  },
-  "dependencies": {
-    "zuraai": "^0.0.0"
   }
 }
