@@ -15,53 +15,56 @@ export const Hero: React.FC<{ duration: number }> = ({ duration }) => {
     <AbsoluteFill style={{ opacity: out }}>
       <Background
         glows={[
-          { color: colors.blue, x: "50%", y: "34%", size: 1300, opacity: 0.28 },
-          { color: colors.purple, x: "70%", y: "70%", size: 900, opacity: 0.16 },
+          { color: colors.blue, x: "70%", y: "42%", size: 900, opacity: 0.10 },
+          { color: colors.purple, x: "30%", y: "78%", size: 700, opacity: 0.06 },
         ]}
       />
       <AbsoluteFill
         style={{
           justifyContent: "center",
           alignItems: "center",
-          flexDirection: "column",
-          gap: 40,
+          flexDirection: "row",
+          gap: 104,
+          padding: "100px 150px",
         }}
       >
-        <div style={enter(frame, fps, 0, { y: 60, blur: 16, scaleFrom: 0.82, damping: 14 })}>
+        <div style={enter(frame, fps, 0, { y: 36, blur: 10, scaleFrom: 0.9 })}>
           <div
             style={{
-              filter: "drop-shadow(0 30px 60px rgba(10,132,255,0.35))",
+              filter: "drop-shadow(0 30px 56px rgba(22,119,255,0.22))",
             }}
           >
-            <Logo size={260} />
+            <Logo size={300} />
           </div>
         </div>
 
-        <div
-          style={{
-            ...enter(frame, fps, 12, { y: 40, blur: 12 }),
-            fontFamily: sans,
-            fontSize: 96,
-            fontWeight: 700,
-            color: colors.text,
-            letterSpacing: -2,
-            marginTop: 20,
-          }}
-        >
-          domaininstall
-        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 20 }}>
+          <div
+            style={{
+              ...enter(frame, fps, 10, { y: 30, blur: 8 }),
+              fontFamily: sans,
+              fontSize: 124,
+              lineHeight: 0.96,
+              fontWeight: 750,
+              color: colors.text,
+              letterSpacing: -5,
+            }}
+          >
+            domaininstall
+          </div>
 
-        <div
-          style={{
-            ...enter(frame, fps, 22, { y: 28, blur: 8 }),
-            fontFamily: sans,
-            fontSize: 44,
-            fontWeight: 300,
-            color: colors.textDim,
-            letterSpacing: 0.5,
-          }}
-        >
-          Install by domain.
+          <div
+            style={{
+              ...enter(frame, fps, 20, { y: 22, blur: 5 }),
+              fontFamily: sans,
+              fontSize: 54,
+              fontWeight: 420,
+              color: colors.textDim,
+              letterSpacing: -0.8,
+            }}
+          >
+            Install by domain.
+          </div>
         </div>
       </AbsoluteFill>
     </AbsoluteFill>

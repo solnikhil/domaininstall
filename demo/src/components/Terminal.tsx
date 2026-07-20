@@ -2,25 +2,24 @@ import React from "react";
 import { colors } from "../theme";
 import { sans as font_display, mono as font_mono } from "../fonts";
 
-/** A macOS-style terminal window with traffic-light controls. */
+/** A focused macOS-style terminal window on the bright editorial canvas. */
 export const Terminal: React.FC<{
   title?: string;
   width?: number;
   minHeight?: number;
   style?: React.CSSProperties;
   children: React.ReactNode;
-}> = ({ title = "zsh — di", width = 900, minHeight = 520, style, children }) => {
+}> = ({ title = "zsh — di", width = 1320, minHeight = 650, style, children }) => {
   return (
     <div
       style={{
         width,
         minHeight,
-        borderRadius: 28,
-        background: "rgba(22,22,24,0.92)",
-        border: `1px solid ${colors.cardBorder}`,
+        borderRadius: 24,
+        background: "#111827",
+        border: "1px solid rgba(16,24,40,0.16)",
         boxShadow:
-          "0 40px 120px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.06)",
-        backdropFilter: "blur(30px)",
+          "0 34px 90px rgba(31,52,82,0.20), 0 8px 24px rgba(31,52,82,0.10), inset 0 1px 0 rgba(255,255,255,0.08)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
@@ -30,11 +29,11 @@ export const Terminal: React.FC<{
       {/* title bar */}
       <div
         style={{
-          height: 64,
+          height: 56,
           display: "flex",
           alignItems: "center",
-          padding: "0 26px",
-          gap: 12,
+          padding: "0 22px",
+          gap: 10,
           background: "rgba(255,255,255,0.03)",
           borderBottom: `1px solid ${colors.hairline}`,
         }}
@@ -48,10 +47,10 @@ export const Terminal: React.FC<{
             textAlign: "center",
             color: colors.textDim,
             fontFamily: font_display,
-            fontSize: 24,
+            fontSize: 20,
             fontWeight: 500,
             letterSpacing: 0.2,
-            marginRight: 54,
+            marginRight: 46,
           }}
         >
           {title}
@@ -61,11 +60,11 @@ export const Terminal: React.FC<{
       <div
         style={{
           flex: 1,
-          padding: "36px 40px",
+          padding: "28px 34px",
           fontFamily: font_mono,
-          fontSize: 34,
-          lineHeight: 1.55,
-          color: colors.text,
+          fontSize: 26,
+          lineHeight: 1.42,
+          color: "#f8fafc",
         }}
       >
         {children}
@@ -77,8 +76,8 @@ export const Terminal: React.FC<{
 const Dot: React.FC<{ color: string }> = ({ color }) => (
   <div
     style={{
-      width: 18,
-      height: 18,
+      width: 14,
+      height: 14,
       borderRadius: "50%",
       background: color,
       boxShadow: "inset 0 0 0 0.5px rgba(0,0,0,0.25)",

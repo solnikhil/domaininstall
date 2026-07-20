@@ -235,6 +235,31 @@ async function cmdVerify(target: string): Promise<number> {
   return 0;
 }
 
+const GET_STARTED = `
+${c.bold("di")} — install packages by domain name
+
+  A domain tells ${c.bold("di")} which package it vouches for.
+  You see the exact install command before anything runs.
+
+${c.cyan("GET STARTED")}
+
+  ${c.bold("1")}  Check the domain's package mapping
+     ${c.dim("$")} ${c.cyan("di verify zuraai.xyz")}
+
+  ${c.bold("2")}  Preview the package and install command
+     ${c.dim("$")} ${c.cyan("di zuraai.xyz")}
+
+  ${c.bold("3")}  Confirm to install with your project's package manager
+     ${c.dim("domain  →  DNS record  →  package preview  →  install")}
+
+${c.cyan("OTHER WAYS TO USE IT")}
+
+  ${c.cyan("di stripe.com/react")}    use a domain sub-package
+  ${c.cyan("di stripe.com@^18")}      request a version range
+
+  ${c.dim("Run")} ${c.bold("di --help")} ${c.dim("for every command and option.")}
+`;
+
 const HELP = `
 ${c.bold("di")} — install a package by domain name
 
@@ -272,8 +297,12 @@ async function main(): Promise<number> {
     info("0.0.1");
     return 0;
   }
-  if (flags.has("-h") || flags.has("--help") || positionals.length === 0) {
+  if (flags.has("-h") || flags.has("--help")) {
     info(HELP);
+    return 0;
+  }
+  if (positionals.length === 0) {
+    info(GET_STARTED);
     return 0;
   }
 

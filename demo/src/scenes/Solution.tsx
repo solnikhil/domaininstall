@@ -20,26 +20,26 @@ export const Solution: React.FC<{ duration: number }> = ({ duration }) => {
   return (
     <AbsoluteFill style={{ opacity: out }}>
       <Background
-        glows={[{ color: colors.blue, x: "50%", y: "50%", size: 1200, opacity: 0.2 }]}
+        glows={[{ color: colors.blue, x: "52%", y: "58%", size: 900, opacity: 0.09 }]}
       />
       <AbsoluteFill
         style={{
           justifyContent: "center",
           alignItems: "center",
           flexDirection: "column",
-          gap: 70,
-          padding: 80,
+          gap: 76,
+          padding: "90px 150px",
         }}
       >
         <div
           style={{
             ...enter(frame, fps, 0, { y: 44 }),
             fontFamily: sans,
-            fontSize: 74,
-            fontWeight: 700,
+            fontSize: 92,
+            fontWeight: 740,
             color: colors.text,
             textAlign: "center",
-            letterSpacing: -1.5,
+            letterSpacing: -3.4,
             lineHeight: 1.12,
           }}
         >
@@ -52,12 +52,12 @@ export const Solution: React.FC<{ duration: number }> = ({ duration }) => {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 40,
+            gap: 54,
             ...enter(frame, fps, 26, { y: 30, blur: 8 }),
           }}
         >
           <Pill text="zuraai.xyz" mono />
-          <div style={{ position: "relative", width: 90, height: 8 }}>
+            <div style={{ position: "relative", width: 150, height: 8 }}>
             <div
               style={{
                 position: "absolute",
@@ -65,16 +65,16 @@ export const Solution: React.FC<{ duration: number }> = ({ duration }) => {
                 height: 6,
                 top: 1,
                 borderRadius: 3,
-                background: colors.textDim,
+                background: colors.blue,
                 transform: `scaleX(${arrow})`,
                 transformOrigin: "left",
               }}
             />
             <div style={{ position: "absolute", right: -10, top: -19, opacity: arrow }}>
-              <Chevron size={44} color={colors.textDim} weight={2.4} />
+              <Chevron size={44} color={colors.blue} weight={2.4} />
             </div>
           </div>
-          <Pill text="stripe" accent mono />
+          <Pill text="zuraai" accent mono />
         </div>
       </AbsoluteFill>
     </AbsoluteFill>
@@ -88,16 +88,18 @@ const Pill: React.FC<{ text: string; accent?: boolean; mono?: boolean }> = ({
   <div
     style={{
       fontFamily: mono,
-      fontSize: 46,
+      fontSize: 54,
       fontWeight: 500,
       color: accent ? "#fff" : colors.text,
-      padding: "18px 36px",
-      borderRadius: 20,
+      padding: "22px 42px",
+      borderRadius: 22,
       background: accent
         ? "linear-gradient(135deg,#0a84ff,#bf5af2)"
-        : "rgba(255,255,255,0.06)",
+        : colors.card,
       border: `1px solid ${accent ? "transparent" : colors.cardBorder}`,
-      boxShadow: accent ? "0 20px 50px rgba(10,132,255,0.4)" : "none",
+      boxShadow: accent
+        ? "0 20px 50px rgba(22,119,255,0.24)"
+        : "0 14px 36px rgba(31,52,82,0.08)",
     }}
   >
     {text}

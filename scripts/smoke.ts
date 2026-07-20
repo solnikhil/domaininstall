@@ -6,6 +6,7 @@
 import { mkdtempSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { resolveTxt } from "../dist/doh.js";
 import { parseRecord, parseRecords } from "../dist/record.js";
@@ -70,11 +71,27 @@ async function main() {
   check("detects pnpm from lockfile", detectPackageManager(tmp).pm === "pnpm");
   rmSync(tmp, { recursive: true, force: true });
 
-  console.log("\n5. Live DoH resolution (real network)");
+  console.log("\n5. CLI guidance");
+  const cli = join(import.meta.dirname, "..", "dist", "cli.js");
+  const getStarted = spawnSync(process.execPath, [cli], { encoding: "utf8" });
+  check(
+    "no arguments shows the guided start flow",
+    getStarted.status === 0 &&
+      getStarted.stdout.includes("GET STARTED") &&
+      getStarted.stdout.includes("di verify zuraai.xyz") &&
+      getStarted.stdout.includes("domain  →  DNS record  →  package preview  →  install"),
+  );
+  const help = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+  check(
+    "--help keeps the full command reference",
+    help.status === 0 && help.stdout.includes("USAGE") && help.stdout.includes("OPTIONS"),
+  );
+
+  console.log("\n6. Live DoH resolution (real network)");
   const dnslink = await resolveTxt("dnslink", "en.wikipedia-on-ipfs.org");
   check("resolves a real TXT record over DoH", dnslink.records.some((r) => r.startsWith("dnslink=/ip")));
 
-  console.log("\n6. Real install handoff (npm install a tiny package)");
+  console.log("\n7. Real install handoff (npm install a tiny package)");
   const proj = mkdtempSync(join(tmpdir(), "dnstall-install-"));
   writeFileSync(join(proj, "package.json"), JSON.stringify({ name: "smoke", version: "1.0.0", private: true }));
   const cwd = process.cwd();

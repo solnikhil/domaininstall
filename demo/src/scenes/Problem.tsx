@@ -14,40 +14,51 @@ export const Problem: React.FC<{ duration: number }> = ({ duration }) => {
 
   return (
     <AbsoluteFill style={{ opacity: out }}>
-      <Background glows={[{ color: colors.red, x: "50%", y: "62%", size: 1000, opacity: 0.14 }]} />
+      <Background glows={[{ color: colors.red, x: "72%", y: "55%", size: 780, opacity: 0.07 }]} />
       <AbsoluteFill
         style={{
           justifyContent: "center",
           alignItems: "center",
-          flexDirection: "column",
-          padding: 90,
-          gap: 54,
+          flexDirection: "row",
+          padding: "100px 150px",
+          gap: 110,
         }}
       >
-        <div
-          style={{
-            ...enter(frame, fps, 0, { y: 40 }),
-            fontFamily: sans,
-            fontSize: 78,
-            fontWeight: 700,
-            color: colors.text,
-            textAlign: "center",
-            letterSpacing: -1.5,
-            lineHeight: 1.1,
-          }}
-        >
-          Every good name
-          <br />
-          is already taken.
+        <div style={{ width: 690, display: "flex", flexDirection: "column", gap: 34 }}>
+          <div
+            style={{
+              ...enter(frame, fps, 0, { y: 34 }),
+              fontFamily: sans,
+              fontSize: 92,
+              fontWeight: 740,
+              color: colors.text,
+              letterSpacing: -3.6,
+              lineHeight: 1.04,
+            }}
+          >
+            Every good name is already taken.
+          </div>
+          <div
+            style={{
+              ...enter(frame, fps, 62, { y: 18, blur: 4 }),
+              fontFamily: sans,
+              fontSize: 38,
+              lineHeight: 1.25,
+              color: colors.textDim,
+            }}
+          >
+            And look-alikes can be malicious.
+          </div>
         </div>
 
         <div
           style={{
             display: "flex",
             flexWrap: "wrap",
-            gap: 20,
-            justifyContent: "center",
-            maxWidth: 820,
+            gap: 18,
+            alignContent: "center",
+            justifyContent: "flex-start",
+            width: 760,
           }}
         >
           {TAKEN.map((name, i) => {
@@ -63,13 +74,14 @@ export const Problem: React.FC<{ duration: number }> = ({ duration }) => {
                   ...st,
                   position: "relative",
                   fontFamily: mono,
-                  fontSize: 40,
+                  fontSize: 38,
                   fontWeight: 500,
                   color: colors.textDim,
-                  padding: "12px 26px",
-                  borderRadius: 16,
-                  background: "rgba(255,255,255,0.05)",
+                  padding: "14px 28px",
+                  borderRadius: 18,
+                  background: colors.card,
                   border: `1px solid ${colors.hairline}`,
+                  boxShadow: "0 12px 30px rgba(31,52,82,0.07)",
                 }}
               >
                 {name}
@@ -91,18 +103,6 @@ export const Problem: React.FC<{ duration: number }> = ({ duration }) => {
           })}
         </div>
 
-        <div
-          style={{
-            ...enter(frame, fps, 74, { y: 24, blur: 6 }),
-            fontFamily: sans,
-            fontSize: 40,
-            fontWeight: 300,
-            color: colors.textDim,
-            textAlign: "center",
-          }}
-        >
-          …and the look-alikes can be malicious.
-        </div>
       </AbsoluteFill>
     </AbsoluteFill>
   );

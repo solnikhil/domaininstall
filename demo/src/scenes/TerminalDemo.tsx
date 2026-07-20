@@ -26,7 +26,7 @@ const rows = [
 const PROMPT = SUMMARY + rows.length * 7 + 16;
 const TYPE_Y = PROMPT + 14;
 const INSTALL = TYPE_Y + 12;
-const DONE = INSTALL + 70;
+const DONE = INSTALL + 55;
 
 const Caret: React.FC<{ frame: number }> = ({ frame }) =>
   Math.floor(frame / 15) % 2 === 0 ? (
@@ -57,10 +57,33 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
 
   return (
     <AbsoluteFill style={{ opacity: out }}>
-      <Background glows={[{ color: colors.blue, x: "50%", y: "42%", size: 1300, opacity: 0.22 }]} />
-      <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+      <Background glows={[{ color: colors.blue, x: "50%", y: "50%", size: 980, opacity: 0.08 }]} />
+      <AbsoluteFill
+        style={{
+          justifyContent: "center",
+          alignItems: "center",
+          flexDirection: "column",
+          gap: 24,
+          padding: "72px 120px 60px",
+        }}
+      >
+        <div
+          style={{
+            opacity: interpolate(frame, [0, 18, duration - 20, duration], [0, 1, 1, 0], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+            }),
+            fontFamily: sans,
+            fontSize: 38,
+            fontWeight: 620,
+            color: colors.text,
+            letterSpacing: -0.6,
+          }}
+        >
+          One command. Verified. Installed.
+        </div>
         <div style={win}>
-          <Terminal width={960} minHeight={900}>
+          <Terminal width={1380} minHeight={720}>
             {/* command line */}
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
               <Chevron color={colors.green} weight={2.8} size={30} />
@@ -72,7 +95,7 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
 
             {/* resolving spinner */}
             {frame >= RESOLVE_START && (
-              <div style={{ marginTop: 18, color: colors.textDim, display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ marginTop: 14, color: "#94a3b8", display: "flex", alignItems: "center", gap: 12 }}>
                 {resolving ? (
                   <>
                     <Spinner frame={frame} size={30} />
@@ -83,7 +106,7 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
                     <CheckMark size={30} />
                     <span>
                       resolved via cloudflare-dns.com{"   "}
-                      <span style={{ color: colors.textDim, fontWeight: 500 }}>DNSSEC —</span>
+                      <span style={{ color: "#94a3b8", fontWeight: 500 }}>DNSSEC —</span>
                     </span>
                   </>
                 )}
@@ -95,11 +118,11 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
               <div
                 style={{
                   ...enter(frame, fps, SUMMARY, { y: 26, blur: 8 }),
-                  marginTop: 26,
-                  padding: "26px 30px",
-                  borderRadius: 20,
-                  background: "rgba(255,255,255,0.04)",
-                  border: `1px solid ${colors.cardBorder}`,
+                  marginTop: 18,
+                  padding: "18px 24px",
+                  borderRadius: 16,
+                  background: "rgba(255,255,255,0.045)",
+                  border: "1px solid rgba(255,255,255,0.08)",
                 }}
               >
                 {rows.map(([label, value], i) => {
@@ -108,12 +131,12 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
                   return (
                     <div
                       key={label}
-                      style={{ ...st, display: "flex", gap: 22, marginBottom: i === rows.length - 1 ? 0 : 12 }}
+                      style={{ ...st, display: "flex", gap: 22, marginBottom: i === rows.length - 1 ? 0 : 6 }}
                     >
-                      <span style={{ color: colors.textDim, width: 200, display: "inline-block" }}>
+                      <span style={{ color: "#94a3b8", width: 180, display: "inline-block" }}>
                         {label}
                       </span>
-                      <span style={{ color: isRun ? colors.blue : colors.text, fontWeight: isRun ? 700 : 400 }}>
+                      <span style={{ color: isRun ? "#60a5fa" : "#f8fafc", fontWeight: isRun ? 700 : 400 }}>
                         {value}
                       </span>
                     </div>
@@ -124,11 +147,11 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
 
             {/* confirm prompt */}
             {frame >= PROMPT && (
-              <div style={{ marginTop: 24, display: "flex", gap: 14, alignItems: "center" }}>
+              <div style={{ marginTop: 18, display: "flex", gap: 14, alignItems: "center" }}>
                 <span>
                   Install <span style={{ fontWeight: 700 }}>zuraai</span> from{" "}
                   <span style={{ fontWeight: 700 }}>zuraai.xyz</span>?{" "}
-                  <span style={{ color: colors.textDim }}>(y/N)</span>
+                  <span style={{ color: "#94a3b8" }}>(y/N)</span>
                 </span>
                 <span style={{ color: colors.green }}>
                   {frame >= TYPE_Y ? "y" : ""}
@@ -139,7 +162,7 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
 
             {/* install output */}
             {frame >= INSTALL && (
-              <div style={{ marginTop: 20, color: colors.textDim, fontSize: 30 }}>
+              <div style={{ marginTop: 14, color: "#94a3b8", fontSize: 24 }}>
                 {frame >= INSTALL + 6 && (
                   <div style={enter(frame, fps, INSTALL + 6, { y: 8, blur: 2 })}>
                     added 1 package in 1.2s
@@ -149,9 +172,9 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
                   <div
                     style={{
                       ...enter(frame, fps, DONE - 8, { y: 12, blur: 4 }),
-                      marginTop: 16,
+                      marginTop: 10,
                       color: colors.green,
-                      fontSize: 36,
+                      fontSize: 28,
                       fontWeight: 700,
                       display: "flex",
                       alignItems: "center",
@@ -167,23 +190,6 @@ export const TerminalDemo: React.FC<{ duration: number }> = ({ duration }) => {
           </Terminal>
         </div>
 
-        {/* caption */}
-        <div
-          style={{
-            opacity: interpolate(frame, [10, 30, duration - 24, duration], [0, 1, 1, 0], {
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-            }),
-            marginTop: 56,
-            fontFamily: sans,
-            fontSize: 40,
-            fontWeight: 300,
-            color: colors.textDim,
-            letterSpacing: 0.3,
-          }}
-        >
-          One command. Verified. Installed.
-        </div>
       </AbsoluteFill>
     </AbsoluteFill>
   );
