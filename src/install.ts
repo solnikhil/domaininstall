@@ -1,4 +1,4 @@
-/** Safe npm-only package-manager handoff for the 0.0.1 alpha. */
+/** Safe npm-only package-manager handoff for the current alpha. */
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -16,7 +16,7 @@ export function detectNpmProject(cwd = process.cwd()): NpmProjectResult {
   if (incompatibleLocks.length > 0) {
     return {
       ok: false,
-      error: `The 0.0.1 alpha only supports npm; found ${incompatibleLocks.join(", ")}.`,
+      error: `The current alpha only supports npm; found ${incompatibleLocks.join(", ")}.`,
     };
   }
 
@@ -33,7 +33,7 @@ export function detectNpmProject(cwd = process.cwd()): NpmProjectResult {
       if (typeof packageManager === "string" && !packageManager.startsWith("npm@")) {
         return {
           ok: false,
-          error: `The 0.0.1 alpha only supports npm; package.json declares ${packageManager}.`,
+          error: `The current alpha only supports npm; package.json declares ${packageManager}.`,
         };
       }
     } else return { ok: false, error: "package.json must contain a JSON object." };

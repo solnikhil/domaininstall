@@ -11,9 +11,21 @@ The idea is simple: a domain owner publishes a small DNS record that points to
 an npm package. `domaininstall` reads that record, shows you exactly what it
 found, and asks before installing anything.
 
-> **Release status:** `0.0.1` is a working release candidate, but it has not
-> been published to npm yet. If you are trying it today, use the source setup
-> below.
+> **Release status:** available on npm. This is still an early release, so the
+> command and DNS format are intentionally small while real-world use shapes
+> what comes next.
+
+## Install
+
+```bash
+npm install --global domaininstall
+```
+
+Then check a domain without installing its package:
+
+```text
+di verify zuraai.xyz
+```
 
 ## Why this exists
 
@@ -126,22 +138,14 @@ The trust store is owner-only, schema-validated, symlink-resistant, atomic, and
 locked while it is being updated. Corrupt state fails closed. Resetting trust
 keeps a backup and requires confirmation unless you intentionally add `--force`.
 
-## Try it from source
+## Development
 
-Until the npm package is published:
+To work on the project locally:
 
 ```bash
 git clone https://github.com/solnikhil/domaininstall.git
 cd domaininstall
 npm ci
-npm run build
-npm link
-di --version
-```
-
-To work on the project:
-
-```bash
 npm test
 npm run test:e2e
 npm run verify:package
@@ -153,8 +157,8 @@ separate because it performs a live DNS lookup and a real npm installation.
 ## Security
 
 The [security policy](SECURITY.md) explains the supported threat model and how
-to report a vulnerability. The [release roadmap](ROADMAP.md) tracks the work
-required for the first public npm release.
+to report a vulnerability. The [release roadmap](ROADMAP.md) tracks ongoing
+hardening and validation work.
 
 ## License
 

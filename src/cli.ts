@@ -435,7 +435,7 @@ async function main(): Promise<number> {
       info(HELP);
       return 0;
     case "version":
-      info("0.0.1");
+      info("0.0.2");
       return 0;
     case "install":
       return cmdInstall(parsed.command.target, { yes: parsed.command.yes });

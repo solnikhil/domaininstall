@@ -64,7 +64,7 @@ try {
   const installedManifest = JSON.parse(
     readFileSync(join(project, "node_modules", "domaininstall", "package.json"), "utf8"),
   ) as { version?: string; dependencies?: Record<string, string>; bin?: Record<string, string> };
-  if (installedManifest.version !== "0.0.1") throw new Error("installed version is not 0.0.1");
+  if (installedManifest.version !== "0.0.2") throw new Error("installed version is not 0.0.2");
   if (installedManifest.dependencies && Object.keys(installedManifest.dependencies).length > 0) {
     throw new Error("domaininstall unexpectedly has production dependencies");
   }
@@ -72,7 +72,7 @@ try {
     if (installedManifest.bin?.[alias] !== "dist/cli.js") throw new Error(`invalid ${alias} bin mapping`);
     const executable = join(project, "node_modules", ".bin", process.platform === "win32" ? `${alias}.cmd` : alias);
     const invocation = run(executable, ["--version"], project);
-    if (invocation.stdout.trim() !== "0.0.1") throw new Error(`${alias} did not report version 0.0.1`);
+    if (invocation.stdout.trim() !== "0.0.2") throw new Error(`${alias} did not report version 0.0.2`);
   }
 
   console.log(`✔ package verified: ${artifact.filename}`);
