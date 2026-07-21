@@ -1,6 +1,6 @@
 {
   "name": "domaininstall",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Install an npm package by domain name. The domain owner declares the mapping with DNS; domaininstall verifies continuity, previews the command, and installs with scripts disabled.",
   "repository": {
     "type": "git",

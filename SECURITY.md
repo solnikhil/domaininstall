@@ -28,7 +28,7 @@ transfer and does not authenticate npm package contents.
 Before the first release, the project must complete the P0 security gate in
 [ROADMAP.md](ROADMAP.md).
 
-The `0.0.1` alpha supports npm only. It pins the effective registry into the
+The current alpha supports npm only. It pins the effective registry into the
 displayed and executed command, disables dependency lifecycle scripts with
 `--ignore-scripts`, rejects conflicting DNS mappings, and treats corrupt or
 unsafe TOFU state as a blocking error. These controls narrow execution risk;
