@@ -1,10 +1,12 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { sanitizeTerminalText } from "./terminal.js";
 
 const useColor = stdout.isTTY && !process.env.NO_COLOR;
 
 function wrap(code: number, s: string): string {
-  return useColor ? `\x1b[${code}m${s}\x1b[0m` : s;
+  const safe = sanitizeTerminalText(s);
+  return useColor ? `\x1b[${code}m${safe}\x1b[0m` : safe;
 }
 
 export const c = {

@@ -62,7 +62,7 @@ export const Spinner: React.FC<{ size?: number; color?: string; frame: number }>
       viewBox="0 0 24 24"
       style={{ transform: `rotate(${(frame * 18) % 360}deg)` }}
     >
-      <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.15)" strokeWidth="3" fill="none" />
+      <circle cx="12" cy="12" r="9" stroke="rgba(148,163,184,0.28)" strokeWidth="3" fill="none" />
       <path
         d="M12 3 a9 9 0 0 1 9 9"
         stroke={color}

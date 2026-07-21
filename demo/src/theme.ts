@@ -1,21 +1,21 @@
-/** Apple-keynote-inspired theme tokens. */
+/** Bright editorial theme tokens for the landscape product film. */
 export const FPS = 30;
-export const WIDTH = 1080;
-export const HEIGHT = 1920;
+export const WIDTH = 1920;
+export const HEIGHT = 1080;
 
 export const colors = {
-  bg: "#000000",
-  bgSoft: "#0a0a0c",
-  text: "#f5f5f7", // Apple's off-white
-  textDim: "#86868b", // Apple's gray text
-  green: "#30d158", // Apple system green
-  red: "#ff453a", // Apple system red
-  blue: "#0a84ff", // Apple system blue
-  purple: "#bf5af2",
-  yellow: "#ffd60a",
-  card: "rgba(28,28,30,0.72)",
-  cardBorder: "rgba(255,255,255,0.10)",
-  hairline: "rgba(255,255,255,0.08)",
+  bg: "#ffffff",
+  bgSoft: "#f5f8fc",
+  text: "#101828",
+  textDim: "#667085",
+  green: "#12a150",
+  red: "#e5484d",
+  blue: "#1677ff",
+  purple: "#7857d9",
+  yellow: "#b77900",
+  card: "rgba(255,255,255,0.90)",
+  cardBorder: "rgba(16,24,40,0.10)",
+  hairline: "rgba(16,24,40,0.08)",
 };
 
 export const font = {
@@ -25,13 +25,13 @@ export const font = {
 
 /** Scene layout — single source of truth for sequencing. */
 export const scenes = {
-  hero: { from: 0, duration: 118 },
-  problem: { from: 118, duration: 132 },
-  solution: { from: 250, duration: 110 },
-  terminal: { from: 360, duration: 320 },
-  how: { from: 680, duration: 150 },
-  security: { from: 830, duration: 118 },
-  outro: { from: 948, duration: 132 },
+  hero: { from: 0, duration: 105 },
+  problem: { from: 105, duration: 120 },
+  solution: { from: 225, duration: 105 },
+  terminal: { from: 330, duration: 240 },
+  how: { from: 570, duration: 120 },
+  security: { from: 690, duration: 105 },
+  outro: { from: 795, duration: 105 },
 } as const;
 
-export const TOTAL = scenes.outro.from + scenes.outro.duration; // 1080 frames = 36s
+export const TOTAL = scenes.outro.from + scenes.outro.duration; // 900 frames = 30s

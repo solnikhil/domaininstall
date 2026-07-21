@@ -18,16 +18,16 @@ export const Security: React.FC<{ duration: number }> = ({ duration }) => {
 
   return (
     <AbsoluteFill style={{ opacity: out }}>
-      <Background glows={[{ color: colors.green, x: "50%", y: "45%", size: 1100, opacity: 0.14 }]} />
+      <Background glows={[{ color: colors.green, x: "50%", y: "54%", size: 850, opacity: 0.07 }]} />
       <AbsoluteFill
-        style={{ justifyContent: "center", alignItems: "center", flexDirection: "column", gap: 54, padding: 90 }}
+        style={{ justifyContent: "center", alignItems: "center", flexDirection: "column", gap: 64, padding: "90px 130px" }}
       >
         <div
           style={{
             ...enter(frame, fps, 0, { y: 36 }),
             fontFamily: sans,
-            fontSize: 72,
-            fontWeight: 700,
+            fontSize: 88,
+            fontWeight: 740,
             color: colors.text,
             letterSpacing: -1.4,
           }}
@@ -35,27 +35,31 @@ export const Security: React.FC<{ duration: number }> = ({ duration }) => {
           Safe by design.
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 26, width: 800 }}>
+        <div style={{ display: "flex", flexDirection: "row", gap: 28, width: "100%", justifyContent: "center" }}>
           {POINTS.map((p, i) => (
             <div
               key={p.title}
               style={{
                 ...enter(frame, fps, 18 + i * 12, { y: 26, blur: 8 }),
                 display: "flex",
-                alignItems: "center",
-                gap: 28,
-                padding: "26px 32px",
-                borderRadius: 22,
-                background: "rgba(255,255,255,0.04)",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 24,
+                padding: "38px 38px",
+                borderRadius: 24,
+                background: colors.card,
                 border: `1px solid ${colors.cardBorder}`,
+                width: 480,
+                minHeight: 290,
+                boxShadow: "0 18px 48px rgba(31,52,82,0.08)",
               }}
             >
               <Check />
               <div>
-                <div style={{ fontFamily: sans, fontSize: 42, fontWeight: 600, color: colors.text }}>
+                <div style={{ fontFamily: sans, fontSize: 38, fontWeight: 650, color: colors.text }}>
                   {p.title}
                 </div>
-                <div style={{ fontFamily: sans, fontSize: 30, fontWeight: 300, color: colors.textDim, marginTop: 4 }}>
+                <div style={{ fontFamily: sans, fontSize: 27, lineHeight: 1.25, fontWeight: 400, color: colors.textDim, marginTop: 10 }}>
                   {p.sub}
                 </div>
               </div>
@@ -78,13 +82,13 @@ const Check: React.FC = () => (
       alignItems: "center",
       justifyContent: "center",
       flexShrink: 0,
-      boxShadow: "0 10px 30px rgba(48,209,88,0.4)",
+      boxShadow: "0 10px 26px rgba(18,161,80,0.20)",
     }}
   >
     <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
       <polyline
         points="7,18 14,25 27,10"
-        stroke="#00220c"
+        stroke="#ffffff"
         strokeWidth="4.5"
         strokeLinecap="round"
         strokeLinejoin="round"

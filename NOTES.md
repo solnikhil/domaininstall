@@ -1,8 +1,9 @@
 # domaininstall — Project Notes
 
-> Working brainstorm + research log. Captures the concept, what the research
-> found, the design we've settled on, the roadmap, and open decisions.
-> Status: **pre-code / planning.** Nothing built yet.
+> **Historical research log.** Early sections retain the original `dpm`/`_dpm`
+> terminology and pre-code assumptions for context. Current product and execution
+> status live in `README.md` and `ROADMAP.md`; the update log below records later
+> naming and implementation decisions.
 
 ---
 
@@ -143,7 +144,7 @@ Two interfaces:
   `dpm <domain>` → DoH TXT lookup → parse DNSLink-style record → confirm →
   npm handoff. Plus `dpm verify <domain>` that diagnoses record problems
   (fixes the DNS-UX pain point). npm only, one shell.
-  Prove end-to-end on `zuraai.in`. **Deliverable: a 20-second demo clip.**
+  Prove end-to-end on `zuraai.xyz`. **Deliverable: a 20-second demo clip.**
 
 - **Phase 1 — Make it real.**
   Subdomain multi-package, multi-PM detection, metadata in records
@@ -167,7 +168,7 @@ Two interfaces:
   verified, no-arbitrary-code replacement for `curl | bash`.
 - **Content:** the "Go wanted this in 2018 and never shipped it / IPFS proved it"
   narrative → HN / Reddit / Lobsters.
-- **Seed supply yourself:** register `_dpm.zuraai.in` + a few friendly OSS
+- **Seed supply yourself:** register `_dpm.zuraai.xyz` + a few friendly OSS
   packages so the tool is useful on day one, not empty.
 
 ---
@@ -201,7 +202,7 @@ Follow-up (if he replies):
 
 - [ ] Confirm command name `dpm` + prefix `_dpm` (recommended).
 - [ ] Scaffold Phase 0 (CLI, DoH resolver, DNSLink-style parser, `verify`, npm handoff).
-- [ ] Set `_dpm.zuraai.in` TXT record and test the full loop live.
+- [x] Set `_dnstall.zuraai.xyz` TXT record and test the full loop live.
 - [ ] Record the 20-second demo clip.
 - [ ] Draft the record spec page (Phase 2).
 - [ ] Send the DM to Sam.
@@ -223,8 +224,9 @@ Follow-up (if he replies):
 ## 9. Update log (post-research build)
 
 ### Naming (decided)
-- npm package / brand: **`domaininstall`** (free on npm; matches repo).
-- CLI commands (bin): **`domaininstall`** + short alias **`dnstall`**.
+- npm package / brand: **`domaininstall`** (not publicly published yet; matches repo).
+- Primary CLI command: **`di`**. Descriptive/legacy aliases: **`domaininstall`** + **`dnstall`**.
+- The unscoped npm package name `di` is already owned by an unrelated dependency-injection project, so the install package remains `domaininstall` while its executable is `di`.
 - `dpm` was dropped — it's already taken on npm (dpm.fi). Any `_dpm`/`dpm=`
   references above are superseded by `_dnstall` / `dnstall=`.
 
@@ -260,8 +262,15 @@ Working CLI in the repo. Node 22 + TypeScript, ESM, **zero runtime deps**
 - `scripts/smoke.ts` — 19 checks passing, incl. **live DoH** + a **real
   `npm install`** handoff.
 
-Only untested path: full resolve→install against a real `_dnstall` record
-(none exist in the wild yet). Closeable by setting a record on `zuraai.in`.
+The live end-to-end test is `npm run test:e2e`. It expects:
+
+```dns
+_dnstall.zuraai.xyz.  TXT  "dnstall=pkg:npm/zuraai"
+```
+
+It runs the compiled `di` CLI, installs the vouched package into a temporary
+project, and verifies an isolated TOFU pin without touching the user's real
+`~/.domaininstall` state.
 
 ### Sam Whited replied (author of Go proposal #26160)
 He's a genuine kindred spirit — his [2017 post](https://blog.samwhited.com/2017/08/musings-on-the-future-of-go-package-management/)
