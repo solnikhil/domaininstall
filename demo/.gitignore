@@ -2,3 +2,9 @@ node_modules/
 out/
 .remotion/
 .chrome/
+
+# The soundtrack is generated, not committed: `npm run audio` rebuilds it from
+# scripts/generate-audio.mjs. Never commit third-party music previews either.
+public/audio/*.wav
+public/audio/*.mp3
+public/audio/*.m4a
