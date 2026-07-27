@@ -481,9 +481,26 @@ globalThis.fetch = async () => new Response(JSON.stringify({
   const unchangedPin = JSON.parse(readFileSync(join(changedState, "pins.json"), "utf8")) as {
     pins: Record<string, { package: string }>;
   };
+  const mappingChangeSafe =
+    mappingChange.status === 130 &&
+    unchangedPin.pins["example.com"]?.package === "old-package" &&
+    !existsSync(marker);
+  if (!mappingChangeSafe) {
+    console.log(
+      `    diagnostics: ${JSON.stringify({
+        status: mappingChange.status,
+        signal: mappingChange.signal,
+        error: mappingChange.error?.message,
+        stdout: mappingChange.stdout,
+        stderr: mappingChange.stderr,
+        pinnedPackage: unchangedPin.pins["example.com"]?.package,
+        installMarkerExists: existsSync(marker),
+      })}`,
+    );
+  }
   check(
     "--yes cannot bypass a changed TOFU mapping",
-    mappingChange.status === 130 && unchangedPin.pins["example.com"]?.package === "old-package" && !existsSync(marker),
+    mappingChangeSafe,
   );
   rmSync(gateRoot, { recursive: true, force: true });
 
