@@ -4,18 +4,40 @@ No release command in this document should be run from a dirty checkout or an
 unprotected branch. Publication is an explicit external action and is not part
 of ordinary development or CI.
 
+## Release input
+
+Set the version once in the clean release shell, without a leading `v`:
+
+```bash
+RELEASE_VERSION=0.0.3
+export RELEASE_VERSION
+```
+
+Every command below uses that value. Confirm it matches the manifest before
+creating a tag:
+
+```bash
+test "$(node -p 'require("./package.json").version')" = "$RELEASE_VERSION"
+```
+
 ## Repository gates
 
-Before creating `v0.0.1`:
+Before creating `v${RELEASE_VERSION}`:
 
-1. Make `main` the default branch and require the `CI` checks for Node 22 and 24.
-2. Disable force pushes and deletion for `main` and `v*` tags.
-3. Create an `npm-production` GitHub environment with required human approval.
-4. Require npm account 2FA and confirm the package name is available.
-5. Run `npm ci`, `npm test`, `npm run test:e2e`,
+1. Confirm `main` is the default branch and requires every current `CI` matrix
+   check.
+2. Confirm force pushes and deletion are disabled for `main` and `v*` tags.
+3. Confirm the `npm-production` GitHub environment requires human approval and
+   only permits protected release tags.
+4. Confirm npm account 2FA is enabled.
+5. Confirm npm trusted publishing names repository
+   `solnikhil/domaininstall`, workflow `publish.yml`, and environment
+   `npm-production`.
+6. Run `npm ci`, `npm test`, `npm run test:e2e`,
    `npm audit --omit=dev`, and `npm run verify:package` from the release commit.
+7. Confirm `git status --short` prints nothing.
 
-## First publication only
+## First publication only (historical)
 
 The first publication uses `.github/workflows/publish-bootstrap.yml` because a
 trusted publisher cannot be attached until the package exists.
@@ -24,8 +46,8 @@ trusted publisher cannot be attached until the package exists.
    shortest practical expiry.
 2. Store it as the `NPM_PUBLISH_TOKEN` secret on the protected
    `npm-production` environment.
-3. Tag the exact verified commit `v0.0.1`, push the tag, and wait for Live E2E.
-4. Manually run **Bootstrap npm publication** while selecting the `v0.0.1` tag.
+3. Tag the exact verified commit, push the tag, and wait for Live E2E.
+4. Manually run **Bootstrap npm publication** while selecting that tag.
 5. Verify the package, then immediately revoke the token and delete the secret.
 
 The workflow refuses branch refs, checks that the tag matches `package.json`,
@@ -35,18 +57,31 @@ provenance.
 ## Later trusted publications
 
 In npm package settings, configure the GitHub trusted publisher for repository
-`solnikhil/domaininstall`, workflow `publish.yml`, environment
-`npm-production`, and the `npm publish` action. Then use the **Publish npm
-package** workflow from an exact version tag. It requests only `contents: read`
-and `id-token: write` and does not use a reusable publish token.
+`solnikhil/domaininstall`, workflow `publish.yml`, and environment
+`npm-production`. Then:
+
+1. Create the annotated tag from the exact verified `main` commit:
+
+   ```bash
+   git tag -a "v${RELEASE_VERSION}" -m "domaininstall ${RELEASE_VERSION}"
+   git push origin "v${RELEASE_VERSION}"
+   ```
+
+2. Wait for the tag-triggered **Live E2E** workflow to pass.
+3. Manually run **Publish npm package** against the exact tag.
+4. Approve the protected `npm-production` deployment after verifying the tag
+   and workflow inputs.
+
+The workflow requests only `contents: read` and `id-token: write`; it does not
+use a reusable publish token.
 
 ## Post-publication verification
 
 From a clean temporary directory:
 
 ```bash
-npm view domaininstall@0.0.1 --json
-npm install --ignore-scripts --save-exact domaininstall@0.0.1
+npm view "domaininstall@${RELEASE_VERSION}" --json
+npm install --ignore-scripts --save-exact "domaininstall@${RELEASE_VERSION}"
 npx --no-install di --version
 npx --no-install domaininstall --version
 npx --no-install dnstall --version
@@ -56,7 +91,9 @@ npm audit signatures
 
 Confirm that the registry version, Git tag commit, provenance subject, packed
 files, README, license, and all executable aliases match the tested artifact.
-Only then create the GitHub release from that same tag.
+Repeat the install and alias checks on Windows. Only then create the GitHub
+release from that same tag and replace `Unreleased` in `CHANGELOG.md` with the
+release date.
 
 ## Rollback
 

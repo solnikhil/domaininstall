@@ -48,6 +48,14 @@ export class PinStoreError extends Error {
   }
 }
 
+/**
+ * POSIX ownership and permission bits, and opening a directory to fsync or
+ * chmod it, do not exist on Windows: `open` on a directory fails there. On
+ * Windows the store relies on the per-user profile directory instead, and the
+ * symlink, schema, and atomic-replace protections below still apply.
+ */
+const IS_WINDOWS = process.platform === "win32";
+
 const DIR = process.env.DOMAININSTALL_STATE_DIR || join(homedir(), ".domaininstall");
 const FILE = join(DIR, "pins.json");
 const LOCK_FILE = join(DIR, "pins.lock");
@@ -78,6 +86,7 @@ function ensureStateDir(): void {
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
     fail(`Unsafe trust-state directory at ${DIR}.`);
   }
+  if (IS_WINDOWS) return;
   const uid = currentUid();
   if (uid !== undefined && stat.uid !== uid) fail(`Trust-state directory is not owned by the current user.`);
   if ((stat.mode & 0o077) !== 0) {
@@ -197,7 +206,7 @@ function load(): PinStore {
     if (!stat.isFile()) fail(`Trust-state path ${FILE} is not a regular file.`);
     const uid = currentUid();
     if (uid !== undefined && stat.uid !== uid) fail(`Trust-state file is not owned by the current user.`);
-    if ((stat.mode & 0o077) !== 0) fchmodSync(fd, 0o600);
+    if (!IS_WINDOWS && (stat.mode & 0o077) !== 0) fchmodSync(fd, 0o600);
     return decodeStore(readFileSync(fd, "utf8"));
   } finally {
     closeSync(fd);
@@ -221,11 +230,15 @@ function writeAtomically(pins: PinStore): void {
     fd = undefined;
     renameSync(temp, FILE);
 
-    const dirFd = openSync(DIR, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      fsyncSync(dirFd);
-    } finally {
-      closeSync(dirFd);
+    if (!IS_WINDOWS) {
+      // Durably record the rename itself. Windows has no directory handle to
+      // flush, and its rename already replaces the target atomically.
+      const dirFd = openSync(DIR, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        fsyncSync(dirFd);
+      } finally {
+        closeSync(dirFd);
+      }
     }
   } finally {
     if (fd !== undefined) closeSync(fd);

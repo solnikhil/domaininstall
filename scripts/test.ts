@@ -23,7 +23,14 @@ import { resolveTxt } from "../dist/doh.js";
 import { parseCliArgs } from "../dist/args.js";
 import { distinctRecordMappings, parseRecord, parseRecords } from "../dist/record.js";
 import { validatePackageName, parseTarget, validateDomain } from "../dist/validate.js";
-import { buildInstallPlan, detectNpmProject, resolveNpmRegistry } from "../dist/install.js";
+import {
+  buildInstallPlan,
+  detectNpmProject,
+  npmScopeOf,
+  resolveEffectiveRegistry,
+  resolveNpmLauncher,
+  resolveNpmRegistry,
+} from "../dist/install.js";
 import { sanitizeTerminalText } from "../dist/terminal.js";
 
 let pass = 0;
@@ -80,6 +87,22 @@ async function main() {
   check("rejects conflicting CLI modes", !parseCliArgs(["example.com", "--help"]).ok);
   check("rejects unsupported -- separator", !parseCliArgs(["example.com", "--"]).ok);
   check("accepts one explicit install confirmation flag", parseCliArgs(["example.com", "--yes"]).ok);
+  const globalInstall = parseCliArgs(["example.com", "-g", "--yes"]);
+  check(
+    "accepts -g alongside --yes",
+    globalInstall.ok &&
+      globalInstall.command.kind === "install" &&
+      globalInstall.command.global === true &&
+      globalInstall.command.yes === true,
+  );
+  const localInstall = parseCliArgs(["example.com"]);
+  check(
+    "install defaults to the current project",
+    localInstall.ok && localInstall.command.kind === "install" && localInstall.command.global === false,
+  );
+  check("rejects both -g and --global", !parseCliArgs(["example.com", "-g", "--global"]).ok);
+  check("rejects --global on verify", !parseCliArgs(["verify", "example.com", "--global"]).ok);
+  check("rejects --global on trust reset", !parseCliArgs(["trust", "reset", "--all", "--global"]).ok);
 
   console.log("\n3. Terminal output sanitization");
   const ansi = sanitizeTerminalText("safe\x1b[31mred\x1b[0m");
@@ -124,11 +147,17 @@ async function main() {
     changedDnsVersion.changes.some((c) => c.field === "dnsVersion"),
   );
 
+  const isWindows = process.platform === "win32";
   const pinFile = join(state, "pins.json");
   const stored = JSON.parse(readFileSync(pinFile, "utf8")) as { version?: number };
   check("writes a versioned pin schema", stored.version === 1);
-  check("restricts pin-file permissions", (statSync(pinFile).mode & 0o777) === 0o600);
-  check("restricts state-directory permissions", (statSync(state).mode & 0o777) === 0o700);
+  if (isWindows) {
+    // Windows has no POSIX mode bits; the store relies on the user profile ACL.
+    console.log("  - skipped POSIX permission checks on Windows");
+  } else {
+    check("restricts pin-file permissions", (statSync(pinFile).mode & 0o777) === 0o600);
+    check("restricts state-directory permissions", (statSync(state).mode & 0o777) === 0o700);
+  }
 
   writeFileSync(pinFile, "{ definitely not json", "utf8");
   let corruptFailedClosed = false;
@@ -141,22 +170,29 @@ async function main() {
   const corruptBackup = resetPinStore();
   check("explicit reset preserves corrupt state as a backup", !!corruptBackup && existsSync(corruptBackup));
 
-  const victim = join(state, "victim.txt");
-  writeFileSync(victim, "must remain unchanged", "utf8");
-  rmSync(pinFile);
-  symlinkSync(victim, pinFile);
-  let symlinkFailedClosed = false;
-  try {
-    getPin(testDomain);
-  } catch {
-    symlinkFailedClosed = true;
+  if (isWindows) {
+    // Creating a symlink on Windows needs elevation or developer mode.
+    console.log("  - skipped symlink trust-state checks on Windows");
+  } else {
+    const victim = join(state, "victim.txt");
+    writeFileSync(victim, "must remain unchanged", "utf8");
+    rmSync(pinFile);
+    symlinkSync(victim, pinFile);
+    let symlinkFailedClosed = false;
+    try {
+      getPin(testDomain);
+    } catch {
+      symlinkFailedClosed = true;
+    }
+    check("refuses a symlinked pin file", symlinkFailedClosed);
+    const symlinkBackup = resetPinStore();
+    check(
+      "recovery moves the symlink without touching its target",
+      !!symlinkBackup &&
+        lstatSync(symlinkBackup).isSymbolicLink() &&
+        readFileSync(victim, "utf8") === "must remain unchanged",
+    );
   }
-  check("refuses a symlinked pin file", symlinkFailedClosed);
-  const symlinkBackup = resetPinStore();
-  check(
-    "recovery moves the symlink without touching its target",
-    !!symlinkBackup && lstatSync(symlinkBackup).isSymbolicLink() && readFileSync(victim, "utf8") === "must remain unchanged",
-  );
 
   const pinModule = new URL("../dist/pin.js", import.meta.url).href;
   const runWriter = (index: number) =>
@@ -204,8 +240,120 @@ async function main() {
   check("rejects an insecure effective registry", !resolveNpmRegistry(tmp).ok);
   rmSync(tmp, { recursive: true, force: true });
 
-  console.log("\n6. CLI guidance");
+  const globalPlan = buildInstallPlan("stripe", undefined, "https://registry.npmjs.org/", { global: true });
+  check(
+    "global plan asks npm for a global install",
+    globalPlan.global && globalPlan.argv.includes("--global") && globalPlan.display.includes("--global"),
+  );
+  const projectPlan = buildInstallPlan("stripe", undefined, "https://registry.npmjs.org/");
+  check(
+    "project plan never adds --global",
+    !projectPlan.global && !projectPlan.argv.includes("--global"),
+  );
+
+  console.log("\n6. Scope-specific registries");
+  check(
+    "extracts the scope of a scoped package",
+    npmScopeOf("@acme/widget") === "@acme" && npmScopeOf("widget") === null && npmScopeOf("@acme") === null,
+  );
+  const scopeDir = mkdtempSync(join(tmpdir(), "dnstall-scope-"));
+  writeFileSync(
+    join(scopeDir, ".npmrc"),
+    "registry=https://packages.example.test/npm/\n@acme:registry=https://other.example.test/npm/\n",
+  );
+  check(
+    "refuses a scope registry that diverges from the pinned registry",
+    !resolveEffectiveRegistry("@acme/widget", scopeDir).ok,
+  );
+  const unscoped = resolveEffectiveRegistry("widget", scopeDir);
+  check(
+    "unscoped packages are unaffected by scope configuration",
+    unscoped.ok && unscoped.registry === "https://packages.example.test/npm/",
+  );
+  writeFileSync(
+    join(scopeDir, ".npmrc"),
+    "registry=https://packages.example.test/npm/\n@acme:registry=https://packages.example.test/npm/\n",
+  );
+  const agreeing = resolveEffectiveRegistry("@acme/widget", scopeDir);
+  check(
+    "accepts a scope registry that matches the default",
+    agreeing.ok && agreeing.registry === "https://packages.example.test/npm/",
+  );
+  rmSync(scopeDir, { recursive: true, force: true });
+
+  console.log("\n7. npm launcher resolution (cross-platform)");
+  const posixLauncher = resolveNpmLauncher({ platform: "linux" });
+  check(
+    "POSIX spawns npm directly without a shell",
+    posixLauncher.ok &&
+      posixLauncher.launcher.command === "npm" &&
+      posixLauncher.launcher.prefixArgs.length === 0,
+  );
+  const launcherRoot = mkdtempSync(join(tmpdir(), "dnstall-launcher-"));
+  const npmHome = join(launcherRoot, "npm-home");
+  mkdirSync(join(npmHome, "node_modules", "npm", "bin"), { recursive: true });
+  const pathNpmCli = join(npmHome, "node_modules", "npm", "bin", "npm-cli.js");
+  writeFileSync(pathNpmCli, "");
+  writeFileSync(join(npmHome, "npm.cmd"), "");
+  const nodeHome = join(launcherRoot, "node-home");
+  mkdirSync(join(nodeHome, "node_modules", "npm", "bin"), { recursive: true });
+  const nodeNpmCli = join(nodeHome, "node_modules", "npm", "bin", "npm-cli.js");
+  writeFileSync(nodeNpmCli, "");
+  const windowsBase = {
+    platform: "win32",
+    pathDelimiter: ";",
+    pathExt: ".COM;.EXE;.BAT;.CMD",
+    npmExecPath: undefined,
+    appData: undefined,
+  };
+  const fromPath = resolveNpmLauncher({
+    ...windowsBase,
+    pathValue: `C:\\definitely\\missing;${npmHome}`,
+    execPath: join(launcherRoot, "unrelated", "node.exe"),
+  });
+  check(
+    "Windows runs npm's CLI entry point with the current Node binary",
+    fromPath.ok &&
+      fromPath.launcher.command === join(launcherRoot, "unrelated", "node.exe") &&
+      fromPath.launcher.prefixArgs.length === 1 &&
+      fromPath.launcher.prefixArgs[0] === pathNpmCli,
+  );
+  const fromNodeDirectory = resolveNpmLauncher({
+    ...windowsBase,
+    pathValue: "",
+    execPath: join(nodeHome, "node.exe"),
+  });
+  check(
+    "Windows falls back to the npm beside the Node binary",
+    fromNodeDirectory.ok && fromNodeDirectory.launcher.prefixArgs[0] === nodeNpmCli,
+  );
+  const noLauncher = resolveNpmLauncher({
+    ...windowsBase,
+    pathValue: "",
+    execPath: join(launcherRoot, "empty", "node.exe"),
+  });
+  check("Windows fails closed when npm's entry point is missing", !noLauncher.ok);
+  rmSync(launcherRoot, { recursive: true, force: true });
+
+  console.log("\n8. CLI guidance");
   const cli = join(import.meta.dirname, "..", "dist", "cli.js");
+  const rootManifest = JSON.parse(
+    readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"),
+  ) as { version: string };
+  const reportedVersion = spawnSync(process.execPath, [cli, "--version"], { encoding: "utf8" });
+  check(
+    "--version reports the manifest version",
+    reportedVersion.status === 0 && reportedVersion.stdout.trim() === rootManifest.version,
+  );
+  const rejectedFlag = spawnSync(process.execPath, [cli, "example.com", "--nope"], { encoding: "utf8" });
+  check(
+    "errors are written to stderr and keep stdout clean",
+    rejectedFlag.status === 1 &&
+      rejectedFlag.stderr.includes("Unknown option") &&
+      rejectedFlag.stdout === "",
+  );
+  const globalHelp = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+  check("--help documents the global install flag", globalHelp.stdout.includes("--global"));
   const getStarted = spawnSync(process.execPath, [cli], { encoding: "utf8" });
   check(
     "no arguments shows the guided start flow",
@@ -235,19 +383,21 @@ async function main() {
   const gateRoot = mkdtempSync(join(tmpdir(), "dnstall-cli-gates-"));
   const fakeBin = join(gateRoot, "bin");
   mkdirSync(fakeBin);
-  const fakeNpm = join(fakeBin, "npm");
-  writeFileSync(
-    fakeNpm,
-    `#!/usr/bin/env node
-const fs = require("node:fs");
+  const fakeNpmBody = `const fs = require("node:fs");
 if (process.argv[2] === "config" && process.argv[3] === "get") {
   process.stdout.write("https://registry.npmjs.org/\\n");
   process.exit(0);
 }
 fs.appendFileSync(process.env.DOMAININSTALL_TEST_MARKER, "install\\n");
-`,
-  );
+`;
+  const fakeNpm = join(fakeBin, "npm");
+  writeFileSync(fakeNpm, `#!/usr/bin/env node\n${fakeNpmBody}`);
   chmodSync(fakeNpm, 0o755);
+  // Windows resolves npm through its JavaScript entry point beside npm.cmd, so
+  // the stand-in has to exist in both shapes for these gates to run everywhere.
+  writeFileSync(join(fakeBin, "npm.cmd"), "@echo off\r\n");
+  mkdirSync(join(fakeBin, "node_modules", "npm", "bin"), { recursive: true });
+  writeFileSync(join(fakeBin, "node_modules", "npm", "bin", "npm-cli.js"), fakeNpmBody);
   const mockDns = join(gateRoot, "mock-dns.mjs");
   writeFileSync(
     mockDns,
@@ -264,9 +414,14 @@ globalThis.fetch = async () => new Response(JSON.stringify({
 `,
   );
   const marker = join(gateRoot, "install-marker");
+  const gatePath = `${fakeBin}${delimiter}${process.env.PATH ?? process.env.Path ?? ""}`;
   const baseGateEnv = {
     ...process.env,
-    PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+    // Windows exposes the search path as "Path"; set both so the child agrees.
+    ...(process.platform === "win32" ? { Path: gatePath } : {}),
+    PATH: gatePath,
+    // Inherited from the outer npm run, this would point the CLI at the real npm.
+    npm_execpath: "",
     DOMAININSTALL_TEST_MARKER: marker,
   };
   const runGatedCli = (args: string[], stateDir: string, dnsMode = "ambiguous") =>
@@ -332,7 +487,7 @@ globalThis.fetch = async () => new Response(JSON.stringify({
   );
   rmSync(gateRoot, { recursive: true, force: true });
 
-  console.log("\n7. Deterministic DNS outcomes and fallback");
+  console.log("\n9. Deterministic DNS outcomes and fallback");
   const jsonResponse = (body: unknown) =>
     new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 

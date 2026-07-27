@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/v0]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -14,11 +14,12 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: [22.14.0, 24.x]
     steps:
       - name: Check out repository

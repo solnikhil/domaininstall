@@ -9,6 +9,8 @@
  *   di verify <domain>                         diagnose the record, no install
  */
 
+import { createRequire } from "node:module";
+
 import { resolveTxt, type DnsAttempt } from "./doh.js";
 import { parseCliArgs } from "./args.js";
 import {
@@ -29,13 +31,21 @@ import {
 import {
   detectNpmProject,
   buildInstallPlan,
+  npmScopeOf,
+  resolveEffectiveRegistry,
+  resolveNpmGlobalPrefix,
   resolveNpmRegistry,
   runInstall,
 } from "./install.js";
-import { c, info, warn, error, success, confirm } from "./ui.js";
+import { c, ce, info, detail, warn, error, success, confirm } from "./ui.js";
 import { sanitizeTerminalText } from "./terminal.js";
 
 const NAMESPACE = "npm"; // only npm is wired up in v0
+
+/** Single source of truth for the CLI version: the published manifest. */
+const VERSION = (
+  createRequire(import.meta.url)("../package.json") as { version: string }
+).version;
 
 interface Resolved {
   domain: string;
@@ -142,7 +152,7 @@ function printResolverAttempts(attempts: DnsAttempt[]): void {
   }
 }
 
-function printSummary(r: Resolved, commandDisplay: string, targetDir: string, registry: string): void {
+function printSummary(r: Resolved, commandDisplay: string, target: string, registry: string): void {
   info("");
   info(`  ${c.dim("domain")}    ${c.bold(r.domain)}   ${dnssecBadge(r.authenticated)}`);
   info(`  ${c.dim("package")}   ${c.bold(r.record.package)}`);
@@ -153,7 +163,7 @@ function printSummary(r: Resolved, commandDisplay: string, targetDir: string, re
   info(`  ${c.dim("DNS policy")} ${r.record.version ? c.bold(r.record.version) : c.dim("latest")}`);
   info(`  ${c.dim("registry")}  ${registry}`);
   info(`  ${c.dim("scripts")}   ${c.bold("disabled")}`);
-  info(`  ${c.dim("into")}      ${sanitizeTerminalText(targetDir)}`);
+  info(`  ${c.dim("into")}      ${sanitizeTerminalText(target)}`);
   if (r.record.metadata.repo) {
     info(`  ${c.dim("repo")}      ${sanitizeTerminalText(r.record.metadata.repo)}`);
   }
@@ -165,14 +175,21 @@ function printSummary(r: Resolved, commandDisplay: string, targetDir: string, re
 function printPinWarning(changes: PinChange[]): void {
   warn("This domain's previously trusted mapping or policy has changed.");
   for (const ch of changes) {
-    info(`    ${ch.field}: ${c.red(ch.was)} ${c.dim("→")} ${c.yellow(ch.now)}`);
+    detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
   }
-  info(c.dim("    A domain can change hands or be hijacked. Only continue if you"));
-  info(c.dim("    expected this change."));
-  info("");
+  detail(ce.dim("    A domain can change hands or be hijacked. Only continue if you"));
+  detail(ce.dim("    expected this change."));
+  detail("");
 }
 
-async function cmdInstall(target: string, opts: { yes: boolean }): Promise<number> {
+/** Where the install will land, for the pre-install preview. */
+function installTargetDescription(global: boolean): string {
+  if (!global) return process.cwd();
+  const prefix = resolveNpmGlobalPrefix();
+  return prefix.ok ? `${prefix.value} (global)` : "npm's global prefix (global)";
+}
+
+async function cmdInstall(target: string, opts: { yes: boolean; global: boolean }): Promise<number> {
   // Reject malformed targets and unsafe/corrupt trust state before invoking npm
   // even for the read-only registry lookup.
   const targetCheck = parseTarget(target);
@@ -185,17 +202,20 @@ async function cmdInstall(target: string, opts: { yes: boolean }): Promise<numbe
     : targetCheck.value.domain;
   getPin(checkedDomain);
 
-  const project = detectNpmProject();
-  if (!project.ok) {
-    error(project.error);
+  // A global install ignores the current directory, so only a project-scoped
+  // install has to agree with the package manager this project declares.
+  if (!opts.global) {
+    const project = detectNpmProject();
+    if (!project.ok) {
+      error(project.error);
+      return 1;
+    }
+  }
+  const defaultRegistry = resolveNpmRegistry();
+  if (!defaultRegistry.ok) {
+    error(defaultRegistry.error);
     return 1;
   }
-  const registryResult = resolveNpmRegistry();
-  if (!registryResult.ok) {
-    error(registryResult.error);
-    return 1;
-  }
-  const registry = registryResult.registry;
 
   const outcome = await resolveTarget(target);
   if (!outcome.ok) {
@@ -205,10 +225,23 @@ async function cmdInstall(target: string, opts: { yes: boolean }): Promise<numbe
   }
   const r = outcome.resolved;
 
-  const plan = buildInstallPlan(r.record.package, r.version, registry);
-  const targetDir = process.cwd();
+  // Re-resolve now that the package name is known: npm gives a scope-specific
+  // registry precedence over the default one, and the pinned/displayed registry
+  // must be the registry npm will actually use.
+  const registryResult = resolveEffectiveRegistry(
+    r.record.package,
+    process.cwd(),
+    defaultRegistry.registry,
+  );
+  if (!registryResult.ok) {
+    error(registryResult.error);
+    return 1;
+  }
+  const registry = registryResult.registry;
 
-  printSummary(r, plan.display, targetDir, registry);
+  const plan = buildInstallPlan(r.record.package, r.version, registry, { global: opts.global });
+
+  printSummary(r, plan.display, installTargetDescription(opts.global), registry);
 
   // TOFU pin check — the domain-hijack defense.
   const { existing, changes } = diffPin(r.domain, {
@@ -335,6 +368,18 @@ async function cmdVerify(target: string): Promise<number> {
     }
   }
 
+  // A scoped package is the one case where local npm configuration can send the
+  // install somewhere other than the default registry, so say so before install.
+  if (npmScopeOf(supportedRecord.package)) {
+    const effective = resolveEffectiveRegistry(supportedRecord.package);
+    if (effective.ok) {
+      info(c.dim(`  registry for this package: ${effective.registry}`));
+    } else {
+      info("");
+      warn(effective.error);
+    }
+  }
+
   const pin = getPin(effectiveDomain);
   info("");
   if (pin) {
@@ -386,6 +431,7 @@ ${c.cyan("OTHER WAYS TO USE IT")}
 
   ${c.cyan("di stripe.com/react")}    use a domain sub-package
   ${c.cyan("di stripe.com@^18")}      request a version range
+  ${c.cyan("di stripe.com -g")}       install globally, not into this project
 
   ${c.dim("Run")} ${c.bold("di --help")} ${c.dim("for every command and option.")}
 `;
@@ -394,7 +440,7 @@ const HELP = `
 ${c.bold("di")} — install a package by domain name
 
 ${c.dim("USAGE")}
-  di <domain>[/sub][@version]                resolve, confirm, and install
+  di <domain>[/sub][@version] [-g]           resolve, confirm, and install
   di verify <domain>                         diagnose the DNS record (no install)
   di trust reset --all [--force]             back up and reset all TOFU pins
   domaininstall <domain>                     descriptive alias
@@ -404,10 +450,12 @@ ${c.dim("EXAMPLES")}
   di zuraai.xyz                      install the package zuraai.xyz vouches for
   di stripe.com/react                install the "react" sub-package
   di stripe.com@^18                  override the install version range
+  di stripe.com --global             install globally instead of into this project
   di verify zuraai.xyz               check the record without installing
 
 ${c.dim("OPTIONS")}
   -y, --yes        skip the confirmation prompt (ignored if the mapping changed)
+  -g, --global     install globally (npm install --global)
   -h, --help       show this help
   -V, --version    show version
   --force          skip the trust-reset prompt (only with trust reset --all)
@@ -435,10 +483,13 @@ async function main(): Promise<number> {
       info(HELP);
       return 0;
     case "version":
-      info("0.0.2");
+      info(VERSION);
       return 0;
     case "install":
-      return cmdInstall(parsed.command.target, { yes: parsed.command.yes });
+      return cmdInstall(parsed.command.target, {
+        yes: parsed.command.yes,
+        global: parsed.command.global,
+      });
     case "verify":
       return cmdVerify(parsed.command.target);
     case "trust_reset":

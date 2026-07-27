@@ -61,6 +61,13 @@ Before the install, `di` prints the resolved package, version policy, registry,
 destination, and exact npm command. It waits for confirmation, then installs
 with lifecycle scripts disabled.
 
+To install a command-line tool for your whole machine instead of the current
+project, add `--global`:
+
+```text
+di example.com --global
+```
+
 ## What is remembered
 
 On first use, `domaininstall` saves the domain-to-package mapping in
@@ -113,6 +120,7 @@ That command looks up `_dnstall.react.example.com`.
 
 ```text
 di <domain>[/sub][@version]    resolve, confirm, and install
+di <domain> --global           install globally instead of into this project
 di verify <domain>             inspect a declaration without installing
 di trust reset --all           back up and reset all saved mappings
 di --help                      show the complete command reference
@@ -122,10 +130,14 @@ di --version                   print the CLI version
 The npm package exposes `di` as the primary command, with `domaininstall` and
 `dnstall` as aliases.
 
+Progress and previews go to standard output; warnings and errors go to standard
+error, so `di` composes with scripts and CI logs.
+
 ## Requirements and current limits
 
 - Node.js 22.14 or newer
 - npm available on `PATH`
+- macOS, Linux, or Windows
 
 The first release deliberately supports npm projects only. pnpm, Yarn, and Bun
 are refused until their install behavior has been tested to the same standard.
@@ -133,6 +145,11 @@ are refused until their install behavior has been tested to the same standard.
 Every install uses the effective HTTPS npm registry explicitly and includes
 `--ignore-scripts`. If a dependency needs a lifecycle script, review that step
 and run it yourself afterward; `domaininstall` will not enable it for you.
+
+If your npm configuration routes a package's scope to a different registry than
+the default one (`@scope:registry`), `di` refuses the install instead of showing
+one registry and fetching from another. Install that package with npm directly
+until scope-specific registries are supported.
 
 The trust store is owner-only, schema-validated, symlink-resistant, atomic, and
 locked while it is being updated. Corrupt state fails closed. Resetting trust

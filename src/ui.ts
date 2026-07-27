@@ -1,35 +1,60 @@
 import { createInterface } from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import { stdin, stdout, stderr } from "node:process";
 import { sanitizeTerminalText } from "./terminal.js";
 
-const useColor = stdout.isTTY && !process.env.NO_COLOR;
-
-function wrap(code: number, s: string): string {
-  const safe = sanitizeTerminalText(s);
-  return useColor ? `\x1b[${code}m${safe}\x1b[0m` : safe;
+export interface Palette {
+  bold: (s: string) => string;
+  dim: (s: string) => string;
+  red: (s: string) => string;
+  green: (s: string) => string;
+  yellow: (s: string) => string;
+  blue: (s: string) => string;
+  cyan: (s: string) => string;
+  gray: (s: string) => string;
 }
 
-export const c = {
-  bold: (s: string) => wrap(1, s),
-  dim: (s: string) => wrap(2, s),
-  red: (s: string) => wrap(31, s),
-  green: (s: string) => wrap(32, s),
-  yellow: (s: string) => wrap(33, s),
-  blue: (s: string) => wrap(34, s),
-  cyan: (s: string) => wrap(36, s),
-  gray: (s: string) => wrap(90, s),
-};
+/**
+ * Colour is decided per stream: writing escape codes into a redirected stream
+ * would corrupt piped output, and stdout and stderr are redirected separately.
+ */
+function palette(isTty: boolean): Palette {
+  const useColor = isTty && !process.env.NO_COLOR;
+  const wrap = (code: number, s: string): string => {
+    const safe = sanitizeTerminalText(s);
+    return useColor ? `\x1b[${code}m${safe}\x1b[0m` : safe;
+  };
+  return {
+    bold: (s) => wrap(1, s),
+    dim: (s) => wrap(2, s),
+    red: (s) => wrap(31, s),
+    green: (s) => wrap(32, s),
+    yellow: (s) => wrap(33, s),
+    blue: (s) => wrap(34, s),
+    cyan: (s) => wrap(36, s),
+    gray: (s) => wrap(90, s),
+  };
+}
+
+/** Palette for standard output: previews, progress, and results. */
+export const c = palette(stdout.isTTY === true);
+/** Palette for standard error: warnings and failures. */
+export const ce = palette(stderr.isTTY === true);
 
 export function info(msg: string): void {
   stdout.write(msg + "\n");
 }
 
+/** A supporting line that belongs with the preceding warning or error. */
+export function detail(msg: string): void {
+  stderr.write(msg + "\n");
+}
+
 export function warn(msg: string): void {
-  stdout.write(c.yellow("⚠  " + msg) + "\n");
+  stderr.write(ce.yellow("⚠  " + msg) + "\n");
 }
 
 export function error(msg: string): void {
-  stdout.write(c.red("✖  " + msg) + "\n");
+  stderr.write(ce.red("✖  " + msg) + "\n");
 }
 
 export function success(msg: string): void {

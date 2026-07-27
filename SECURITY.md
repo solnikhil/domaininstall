@@ -2,9 +2,10 @@
 
 ## Project status
 
-`domaininstall` is an experimental pre-release project. No published version is
-currently supported. Security reports against the current repository are still
-welcome and will be handled on a best-effort basis.
+`domaininstall` is an early alpha. Only the latest published version and the
+current `main` branch receive fixes; older versions are not patched. Security
+reports are welcome and are handled on a best-effort basis by a single
+maintainer.
 
 ## Security boundary
 
@@ -25,14 +26,18 @@ and terminal-facing strings are treated as untrusted inputs. DNSSEC can
 authenticate DNS data, but it does not prove continued ownership after a domain
 transfer and does not authenticate npm package contents.
 
-Before the first release, the project must complete the P0 security gate in
-[ROADMAP.md](ROADMAP.md).
+The P0 security gate in [ROADMAP.md](ROADMAP.md) was completed before the first
+published release; that file tracks the hardening work that remains.
 
 The current alpha supports npm only. It pins the effective registry into the
-displayed and executed command, disables dependency lifecycle scripts with
-`--ignore-scripts`, rejects conflicting DNS mappings, and treats corrupt or
-unsafe TOFU state as a blocking error. These controls narrow execution risk;
-they do not make the selected package trustworthy.
+displayed and executed command, refuses an install when a scope-specific
+registry would divert the request away from that pinned registry, disables
+dependency lifecycle scripts with `--ignore-scripts`, rejects conflicting DNS
+mappings, and treats corrupt or unsafe TOFU state as a blocking error. On
+Windows it invokes npm's own CLI entry point with the current Node binary rather
+than passing a command line through `cmd.exe`, so version ranges such as `^18`
+are never interpreted by a shell. These controls narrow execution risk; they do
+not make the selected package trustworthy.
 
 ## Reporting a vulnerability
 
