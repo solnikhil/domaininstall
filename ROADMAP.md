@@ -16,7 +16,7 @@ or replacement for npm provenance, lockfiles, allowlists, and dependency review.
 
 ## Where the project actually stands
 
-Last reviewed 2026-07-25.
+Last reviewed 2026-07-27.
 
 - `domaininstall` is published on npm: `0.0.1` and `0.0.2`, both with SLSA
   provenance attestations and registry signatures.
@@ -68,13 +68,13 @@ Last reviewed 2026-07-25.
 
 ## Next: release `0.0.3`
 
-- [ ] Land the changes above on `main` through a pull request with green CI on
+- [x] Land the changes above on `main` through a pull request with green CI on
       all six matrix jobs, including the two Windows jobs.
 - [x] Protect `main` and `v*` tags from force pushes and deletion.
 - [x] Require all six current Linux, macOS, and Windows matrix checks on `main`.
-- [ ] Enable npm account 2FA.
+- [x] Enable npm account 2FA.
 - [x] Protect the `npm-production` environment with staged human approval.
-- [ ] Confirm npm OIDC trusted publishing targets `publish.yml` and the
+- [x] Confirm npm OIDC trusted publishing targets `publish.yml` and the
       `npm-production` environment.
 - [ ] Tag `v0.0.3`, publish with provenance, and run the post-publication
       verification in `docs/RELEASE.md` from a clean machine, including a
