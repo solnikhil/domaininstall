@@ -2,10 +2,125 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { sanitizeTerminalText } from "./terminal.js";
 
 const NON_NPM_LOCKFILES = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"] as const;
+
+/**
+ * How to invoke npm on this platform.
+ *
+ * On POSIX systems `npm` is an executable shim and can be spawned directly with
+ * `shell: false`. On Windows it is `npm.cmd`, which Node refuses to spawn
+ * without a shell, and running it through `cmd.exe` would expose npm arguments
+ * to command-line parsing — a version range such as `^18` or `>=1 <2` contains
+ * characters `cmd.exe` treats as escapes and redirections. So on Windows we
+ * locate npm's own JavaScript entry point and run it with the current Node
+ * binary, which is exactly what `npm.cmd` does internally, with no shell in the
+ * middle.
+ */
+export interface NpmLauncher {
+  /** Executable to spawn. */
+  command: string;
+  /** Arguments that must precede npm's own arguments. */
+  prefixArgs: string[];
+}
+
+export interface NpmLauncherEnvironment {
+  platform: string;
+  /** Value of `PATH` (or `Path` on Windows). */
+  pathValue: string;
+  /** Value of `PATHEXT`, used to find the npm launcher on Windows. */
+  pathExt: string;
+  /** Separator between `PATH` entries on the target platform. */
+  pathDelimiter: string;
+  /** Path to the running Node binary. */
+  execPath: string;
+  /** `npm_execpath`, set when running inside an npm script. */
+  npmExecPath: string | undefined;
+  /** Windows per-user application data directory, where npm installs globals. */
+  appData: string | undefined;
+  exists: (candidate: string) => boolean;
+}
+
+export type NpmLauncherResult = { ok: true; launcher: NpmLauncher } | { ok: false; error: string };
+
+const NPM_CLI_SCRIPT = join("node_modules", "npm", "bin", "npm-cli.js");
+
+function defaultLauncherEnvironment(): NpmLauncherEnvironment {
+  return {
+    platform: process.platform,
+    pathValue: process.env.PATH ?? process.env.Path ?? "",
+    pathExt: process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD",
+    pathDelimiter: delimiter,
+    execPath: process.execPath,
+    npmExecPath: process.env.npm_execpath,
+    appData: process.env.APPDATA,
+    exists: existsSync,
+  };
+}
+
+/** Directories on `PATH` that contain an npm launcher. */
+function npmLauncherDirectories(env: NpmLauncherEnvironment): string[] {
+  // PATHEXT is conventionally upper case while the files on disk are usually
+  // lower case. Windows itself is case-insensitive, so try both spellings.
+  const extensions = new Set<string>([""]);
+  for (const raw of env.pathExt.split(";")) {
+    const extension = raw.trim();
+    if (!extension) continue;
+    extensions.add(extension);
+    extensions.add(extension.toLowerCase());
+  }
+  const directories: string[] = [];
+  for (const rawDirectory of env.pathValue.split(env.pathDelimiter)) {
+    const directory = rawDirectory.replace(/^"|"$/g, "").trim();
+    if (!directory) continue;
+    if ([...extensions].some((extension) => env.exists(join(directory, `npm${extension}`)))) {
+      directories.push(directory);
+    }
+  }
+  return directories;
+}
+
+export function resolveNpmLauncher(overrides: Partial<NpmLauncherEnvironment> = {}): NpmLauncherResult {
+  const env: NpmLauncherEnvironment = { ...defaultLauncherEnvironment(), ...overrides };
+
+  if (env.platform !== "win32") {
+    return { ok: true, launcher: { command: "npm", prefixArgs: [] } };
+  }
+
+  const candidates: string[] = [];
+  if (env.npmExecPath && env.npmExecPath.toLowerCase().endsWith(".js")) {
+    candidates.push(env.npmExecPath);
+  }
+  for (const directory of npmLauncherDirectories(env)) {
+    candidates.push(join(directory, NPM_CLI_SCRIPT));
+  }
+  const nodeDirectory = dirname(env.execPath);
+  candidates.push(join(nodeDirectory, NPM_CLI_SCRIPT));
+  candidates.push(join(nodeDirectory, "..", "lib", NPM_CLI_SCRIPT));
+  if (env.appData) candidates.push(join(env.appData, "npm", NPM_CLI_SCRIPT));
+
+  for (const candidate of candidates) {
+    if (env.exists(candidate)) {
+      return { ok: true, launcher: { command: env.execPath, prefixArgs: [candidate] } };
+    }
+  }
+
+  return {
+    ok: false,
+    error:
+      "Could not locate npm's CLI entry point (node_modules/npm/bin/npm-cli.js) on this Windows system. " +
+      "Install Node.js with npm, or make sure npm is on PATH, then try again.",
+  };
+}
+
+let cachedLauncher: NpmLauncherResult | undefined;
+
+function npmLauncher(): NpmLauncherResult {
+  cachedLauncher ??= resolveNpmLauncher();
+  return cachedLauncher;
+}
 
 export type NpmProjectResult =
   | { ok: true; hasProject: boolean; detectedFrom: string }
@@ -52,24 +167,39 @@ export function detectNpmProject(cwd = process.cwd()): NpmProjectResult {
 }
 
 export type RegistryResult = { ok: true; registry: string } | { ok: false; error: string };
+export type NpmConfigResult = { ok: true; value: string } | { ok: false; error: string };
 
-/** Ask npm for its effective registry, validate it, then pin it as a CLI flag. */
-export function resolveNpmRegistry(cwd = process.cwd()): RegistryResult {
-  const result = spawnSync("npm", ["config", "get", "registry"], {
+/** Read a single npm config value without involving a shell. */
+function npmConfigGet(key: string, cwd: string): NpmConfigResult {
+  const launcher = npmLauncher();
+  if (!launcher.ok) return { ok: false, error: launcher.error };
+
+  const result = spawnSync(launcher.launcher.command, [...launcher.launcher.prefixArgs, "config", "get", key], {
     cwd,
     encoding: "utf8",
     shell: false,
-    timeout: 5000,
+    timeout: 10000,
   });
-  if (result.error) return { ok: false, error: `Could not read npm's effective registry: ${result.error.message}` };
-  if (result.status !== 0) return { ok: false, error: "npm config get registry failed." };
+  if (result.error) {
+    return { ok: false, error: `Could not read npm configuration (${key}): ${result.error.message}` };
+  }
+  if (result.status !== 0) return { ok: false, error: `npm config get ${key} failed.` };
+  if (typeof result.stdout !== "string") return { ok: false, error: `npm returned no value for ${key}.` };
 
-  const lines = result.stdout.split(/\r?\n/).filter((line) => line.length > 0);
-  if (lines.length !== 1) return { ok: false, error: "npm returned an invalid registry value." };
+  const lines = result.stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length !== 1) return { ok: false, error: `npm returned an invalid value for ${key}.` };
+  return { ok: true, value: lines[0]!.trim() };
+}
 
+/** npm prints these when a config key has no value. */
+function isUnsetConfigValue(value: string): boolean {
+  return value.length === 0 || value === "undefined" || value === "null";
+}
+
+function validateRegistryUrl(raw: string): RegistryResult {
   let url: URL;
   try {
-    url = new URL(lines[0]!);
+    url = new URL(raw);
   } catch {
     return { ok: false, error: "npm returned a malformed registry URL." };
   }
@@ -80,23 +210,108 @@ export function resolveNpmRegistry(cwd = process.cwd()): RegistryResult {
   return { ok: true, registry: url.href };
 }
 
+/** Ask npm for its default effective registry, then validate it. */
+export function resolveNpmRegistry(cwd = process.cwd()): RegistryResult {
+  const configured = npmConfigGet("registry", cwd);
+  if (!configured.ok) return { ok: false, error: configured.error };
+  if (isUnsetConfigValue(configured.value)) {
+    return { ok: false, error: "npm returned an invalid registry value." };
+  }
+  return validateRegistryUrl(configured.value);
+}
+
+/** `@scope` of a package name, or null when the name is unscoped. */
+export function npmScopeOf(pkg: string): string | null {
+  if (!pkg.startsWith("@")) return null;
+  const slash = pkg.indexOf("/");
+  if (slash <= 1) return null;
+  const scope = pkg.slice(0, slash);
+  return /^@[a-z0-9][a-z0-9._-]*$/.test(scope) ? scope : null;
+}
+
+/**
+ * The registry npm will actually use for this package.
+ *
+ * npm gives a scope-specific `@scope:registry` setting precedence over the
+ * default registry, including over an explicit `--registry` flag. Rather than
+ * display and pin one registry while npm quietly fetches from another, refuse
+ * the install when the two disagree.
+ */
+export function resolveEffectiveRegistry(
+  pkg: string,
+  cwd = process.cwd(),
+  /** Already-resolved default registry, to avoid asking npm twice. */
+  knownDefaultRegistry?: string,
+): RegistryResult {
+  const base: RegistryResult = knownDefaultRegistry
+    ? { ok: true, registry: knownDefaultRegistry }
+    : resolveNpmRegistry(cwd);
+  if (!base.ok) return base;
+
+  const scope = npmScopeOf(pkg);
+  if (!scope) return base;
+
+  const scoped = npmConfigGet(`${scope}:registry`, cwd);
+  if (!scoped.ok) return { ok: false, error: scoped.error };
+  if (isUnsetConfigValue(scoped.value)) return base;
+
+  const scopedRegistry = validateRegistryUrl(scoped.value);
+  if (!scopedRegistry.ok) {
+    return { ok: false, error: `npm routes ${scope} to an unsupported registry: ${scopedRegistry.error}` };
+  }
+  if (scopedRegistry.registry !== base.registry) {
+    return {
+      ok: false,
+      error:
+        `Your npm configuration routes ${scope} to ${scopedRegistry.registry}, not ${base.registry}. ` +
+        "npm gives a scope-specific registry precedence over the registry domaininstall pins, so the " +
+        `install is refused rather than shown against the wrong registry. Install ${pkg} with npm directly.`,
+    };
+  }
+  return base;
+}
+
+/** Where a global install would place the package. */
+export function resolveNpmGlobalPrefix(cwd = process.cwd()): NpmConfigResult {
+  const prefix = npmConfigGet("prefix", cwd);
+  if (!prefix.ok) return prefix;
+  if (isUnsetConfigValue(prefix.value)) return { ok: false, error: "npm returned an empty global prefix." };
+  return prefix;
+}
+
 export interface InstallPlan {
   pm: "npm";
   spec: string;
   registry: string;
+  global: boolean;
   argv: string[];
   display: string;
 }
 
-export function buildInstallPlan(pkg: string, version: string | undefined, registry: string): InstallPlan {
+export function buildInstallPlan(
+  pkg: string,
+  version: string | undefined,
+  registry: string,
+  options: { global?: boolean } = {},
+): InstallPlan {
   const spec = version ? `${pkg}@${version}` : pkg;
-  const argv = ["install", "--ignore-scripts", `--registry=${registry}`, spec];
-  return { pm: "npm", spec, registry, argv, display: `npm ${argv.join(" ")}` };
+  const global = options.global === true;
+  const argv = ["install", "--ignore-scripts"];
+  if (global) argv.push("--global");
+  argv.push(`--registry=${registry}`, spec);
+  return { pm: "npm", spec, registry, global, argv, display: `npm ${argv.join(" ")}` };
 }
 
 export function runInstall(plan: InstallPlan): Promise<number> {
   return new Promise((resolve) => {
-    const child = spawn("npm", plan.argv, {
+    const launcher = npmLauncher();
+    if (!launcher.ok) {
+      process.stderr.write(`${sanitizeTerminalText(launcher.error)}\n`);
+      resolve(127);
+      return;
+    }
+
+    const child = spawn(launcher.launcher.command, [...launcher.launcher.prefixArgs, ...plan.argv], {
       stdio: "inherit",
       shell: false,
     });

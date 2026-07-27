@@ -48,6 +48,16 @@ export class PinStoreError extends Error {
   }
 }
 
+/**
+ * POSIX ownership and permission bits, opening a directory to fsync it, and
+ * the O_NOFOLLOW guarantee used for file opens are unavailable on Windows.
+ * Windows still rejects a symlinked state directory via lstat, validates the
+ * schema, locks writers, and atomically replaces the store, but file-level
+ * symlinks or reparse points do not receive the same no-follow guarantee. The
+ * Windows store therefore also relies on the per-user profile directory ACL.
+ */
+const IS_WINDOWS = process.platform === "win32";
+
 const DIR = process.env.DOMAININSTALL_STATE_DIR || join(homedir(), ".domaininstall");
 const FILE = join(DIR, "pins.json");
 const LOCK_FILE = join(DIR, "pins.lock");
@@ -78,6 +88,7 @@ function ensureStateDir(): void {
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
     fail(`Unsafe trust-state directory at ${DIR}.`);
   }
+  if (IS_WINDOWS) return;
   const uid = currentUid();
   if (uid !== undefined && stat.uid !== uid) fail(`Trust-state directory is not owned by the current user.`);
   if ((stat.mode & 0o077) !== 0) {
@@ -197,7 +208,7 @@ function load(): PinStore {
     if (!stat.isFile()) fail(`Trust-state path ${FILE} is not a regular file.`);
     const uid = currentUid();
     if (uid !== undefined && stat.uid !== uid) fail(`Trust-state file is not owned by the current user.`);
-    if ((stat.mode & 0o077) !== 0) fchmodSync(fd, 0o600);
+    if (!IS_WINDOWS && (stat.mode & 0o077) !== 0) fchmodSync(fd, 0o600);
     return decodeStore(readFileSync(fd, "utf8"));
   } finally {
     closeSync(fd);
@@ -221,11 +232,15 @@ function writeAtomically(pins: PinStore): void {
     fd = undefined;
     renameSync(temp, FILE);
 
-    const dirFd = openSync(DIR, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      fsyncSync(dirFd);
-    } finally {
-      closeSync(dirFd);
+    if (!IS_WINDOWS) {
+      // Durably record the rename itself. Windows has no directory handle to
+      // flush, and its rename already replaces the target atomically.
+      const dirFd = openSync(DIR, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        fsyncSync(dirFd);
+      } finally {
+        closeSync(dirFd);
+      }
     }
   } finally {
     if (fd !== undefined) closeSync(fd);

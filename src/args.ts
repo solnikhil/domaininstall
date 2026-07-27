@@ -2,13 +2,24 @@ export type CliCommand =
   | { kind: "get_started" }
   | { kind: "help" }
   | { kind: "version" }
-  | { kind: "install"; target: string; yes: boolean }
+  | { kind: "install"; target: string; yes: boolean; global: boolean }
   | { kind: "verify"; target: string }
   | { kind: "trust_reset"; force: boolean };
 
 export type CliParseResult = { ok: true; command: CliCommand } | { ok: false; error: string };
 
-const KNOWN_FLAGS = new Set(["-y", "--yes", "-h", "--help", "-V", "--version", "--all", "--force"]);
+const KNOWN_FLAGS = new Set([
+  "-y",
+  "--yes",
+  "-g",
+  "--global",
+  "-h",
+  "--help",
+  "-V",
+  "--version",
+  "--all",
+  "--force",
+]);
 
 export function parseCliArgs(args: string[]): CliParseResult {
   if (args.length === 0) return { ok: true, command: { kind: "get_started" } };
@@ -50,12 +61,20 @@ export function parseCliArgs(args: string[]): CliParseResult {
   }
 
   if (positionals.length !== 1) return { ok: false, error: "Install requires exactly one domain target." };
-  if (flags.some((flag) => flag !== "-y" && flag !== "--yes")) {
-    return { ok: false, error: "Only -y or --yes is valid with an install target." };
+  const confirmFlags = flags.filter((flag) => flag === "-y" || flag === "--yes");
+  const globalFlags = flags.filter((flag) => flag === "-g" || flag === "--global");
+  if (confirmFlags.length + globalFlags.length !== flags.length) {
+    return { ok: false, error: "Only -y/--yes and -g/--global are valid with an install target." };
   }
-  if (flags.length > 1) return { ok: false, error: "Use only one of -y or --yes." };
+  if (confirmFlags.length > 1) return { ok: false, error: "Use only one of -y or --yes." };
+  if (globalFlags.length > 1) return { ok: false, error: "Use only one of -g or --global." };
   return {
     ok: true,
-    command: { kind: "install", target: positionals[0]!, yes: flags.length === 1 },
+    command: {
+      kind: "install",
+      target: positionals[0]!,
+      yes: confirmFlags.length === 1,
+      global: globalFlags.length === 1,
+    },
   };
 }
