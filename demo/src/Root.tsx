@@ -1,13 +1,13 @@
 import React from "react";
-import { Composition } from "remotion";
-import { DomainInstall } from "./DomainInstall";
-import { FPS, WIDTH, HEIGHT, TOTAL } from "./theme";
+import {Composition} from "remotion";
+import {FPS, HEIGHT, TOTAL, WIDTH} from "./design";
+import {Story} from "./Story";
 
 export const RemotionRoot: React.FC = () => {
   return (
     <Composition
       id="DomainInstall"
-      component={DomainInstall}
+      component={Story}
       durationInFrames={TOTAL}
       fps={FPS}
       width={WIDTH}
