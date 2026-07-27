@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 import { resolveTxt } from "../dist/doh.js";
 import { parseCliArgs } from "../dist/args.js";
@@ -413,6 +414,9 @@ globalThis.fetch = async () => new Response(JSON.stringify({
 }), { status: 200, headers: { "content-type": "application/json" } });
 `,
   );
+  // Node requires an explicit file URL for --import on Windows; a C:\... path
+  // is otherwise parsed as an unsupported URL scheme.
+  const mockDnsUrl = pathToFileURL(mockDns).href;
   const marker = join(gateRoot, "install-marker");
   const gatePath = `${fakeBin}${delimiter}${process.env.PATH ?? process.env.Path ?? ""}`;
   const baseGateEnv = {
@@ -425,7 +429,7 @@ globalThis.fetch = async () => new Response(JSON.stringify({
     DOMAININSTALL_TEST_MARKER: marker,
   };
   const runGatedCli = (args: string[], stateDir: string, dnsMode = "ambiguous") =>
-    spawnSync(process.execPath, ["--import", mockDns, cli, ...args], {
+    spawnSync(process.execPath, ["--import", mockDnsUrl, cli, ...args], {
       encoding: "utf8",
       env: { ...baseGateEnv, DOMAININSTALL_STATE_DIR: stateDir, DOMAININSTALL_TEST_DNS_MODE: dnsMode },
     });
@@ -447,14 +451,19 @@ globalThis.fetch = async () => new Response(JSON.stringify({
   const corruptInstall = runGatedCli(["example.com", "--yes"], corruptState);
   check(
     "corrupt trust state fails before npm or installation",
-    corruptInstall.status === 1 && !existsSync(marker),
+    corruptInstall.status === 1 &&
+      corruptInstall.stderr.includes("trust reset --all") &&
+      !existsSync(marker),
   );
 
   const ambiguousState = join(gateRoot, "ambiguous-state");
   const ambiguous = runGatedCli(["example.com", "--yes"], ambiguousState);
   check(
     "--yes cannot bypass ambiguous DNS mappings",
-    ambiguous.status === 1 && !existsSync(marker) && !existsSync(join(ambiguousState, "pins.json")),
+    ambiguous.status === 1 &&
+      ambiguous.stderr.includes("Conflicting domaininstall mappings") &&
+      !existsSync(marker) &&
+      !existsSync(join(ambiguousState, "pins.json")),
   );
 
   const changedState = join(gateRoot, "changed-state");
