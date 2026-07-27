@@ -70,8 +70,7 @@ Last reviewed 2026-07-25.
 - [ ] Land the changes above on `main` through a pull request with green CI on
       all six matrix jobs, including the two Windows jobs.
 - [x] Protect `main` and `v*` tags from force pushes and deletion.
-- [ ] Replace the two legacy Linux-only required-check contexts with all six
-      current Linux, macOS, and Windows matrix checks after their first PR run.
+- [x] Require all six current Linux, macOS, and Windows matrix checks on `main`.
 - [ ] Enable npm account 2FA.
 - [x] Protect the `npm-production` environment with staged human approval.
 - [ ] Confirm npm OIDC trusted publishing targets `publish.yml` and the
