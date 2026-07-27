@@ -49,10 +49,12 @@ export class PinStoreError extends Error {
 }
 
 /**
- * POSIX ownership and permission bits, and opening a directory to fsync or
- * chmod it, do not exist on Windows: `open` on a directory fails there. On
- * Windows the store relies on the per-user profile directory instead, and the
- * symlink, schema, and atomic-replace protections below still apply.
+ * POSIX ownership and permission bits, opening a directory to fsync it, and
+ * the O_NOFOLLOW guarantee used for file opens are unavailable on Windows.
+ * Windows still rejects a symlinked state directory via lstat, validates the
+ * schema, locks writers, and atomically replaces the store, but file-level
+ * symlinks or reparse points do not receive the same no-follow guarantee. The
+ * Windows store therefore also relies on the per-user profile directory ACL.
  */
 const IS_WINDOWS = process.platform === "win32";
 

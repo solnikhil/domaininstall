@@ -24,18 +24,21 @@ test "$(node -p 'require("./package.json").version')" = "$RELEASE_VERSION"
 
 Before creating `v${RELEASE_VERSION}`:
 
-1. Confirm `main` is the default branch and requires every current `CI` matrix
+1. Finalize the matching `CHANGELOG.md` entry with the intended release date,
+   commit it through the protected branch, and confirm the release checkout is
+   that exact `main` commit. The tag must include the finalized changelog.
+2. Confirm `main` is the default branch and requires every current `CI` matrix
    check.
-2. Confirm force pushes and deletion are disabled for `main` and `v*` tags.
-3. Confirm the `npm-production` GitHub environment requires human approval and
+3. Confirm force pushes and deletion are disabled for `main` and `v*` tags.
+4. Confirm the `npm-production` GitHub environment requires human approval and
    only permits protected release tags.
-4. Confirm npm account 2FA is enabled.
-5. Confirm npm trusted publishing names repository
+5. Confirm npm account 2FA is enabled.
+6. Confirm npm trusted publishing names repository
    `solnikhil/domaininstall`, workflow `publish.yml`, and environment
    `npm-production`.
-6. Run `npm ci`, `npm test`, `npm run test:e2e`,
+7. Run `npm ci`, `npm test`, `npm run test:e2e`,
    `npm audit --omit=dev`, and `npm run verify:package` from the release commit.
-7. Confirm `git status --short` prints nothing.
+8. Confirm `git status --short` prints nothing.
 
 ## First publication only (historical)
 
@@ -77,23 +80,31 @@ use a reusable publish token.
 
 ## Post-publication verification
 
-From a clean temporary directory:
+From a clean temporary directory on macOS or Linux, isolate the release check
+from user npm configuration and pin every registry operation to the public npm
+registry:
 
 ```bash
-npm view "domaininstall@${RELEASE_VERSION}" --json
-npm install --ignore-scripts --save-exact "domaininstall@${RELEASE_VERSION}"
+: > empty-npmrc
+export NPM_CONFIG_USERCONFIG="$PWD/empty-npmrc"
+export PUBLIC_NPM_REGISTRY="https://registry.npmjs.org/"
+npm view "domaininstall@${RELEASE_VERSION}" --json --registry="$PUBLIC_NPM_REGISTRY"
+npm install --ignore-scripts --save-exact "domaininstall@${RELEASE_VERSION}" \
+  --registry="$PUBLIC_NPM_REGISTRY"
 npx --no-install di --version
 npx --no-install domaininstall --version
 npx --no-install dnstall --version
 npx --no-install di verify zuraai.xyz
-npm audit signatures
+npm audit signatures --registry="$PUBLIC_NPM_REGISTRY"
 ```
+
+Use an empty `NPM_CONFIG_USERCONFIG` and the same explicit public registry for
+the equivalent PowerShell commands on Windows.
 
 Confirm that the registry version, Git tag commit, provenance subject, packed
 files, README, license, and all executable aliases match the tested artifact.
 Repeat the install and alias checks on Windows. Only then create the GitHub
-release from that same tag and replace `Unreleased` in `CHANGELOG.md` with the
-release date.
+release from that same tag.
 
 ## Rollback
 

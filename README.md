@@ -151,9 +151,12 @@ the default one (`@scope:registry`), `di` refuses the install instead of showing
 one registry and fetching from another. Install that package with npm directly
 until scope-specific registries are supported.
 
-The trust store is owner-only, schema-validated, symlink-resistant, atomic, and
-locked while it is being updated. Corrupt state fails closed. Resetting trust
-keeps a backup and requires confirmation unless you intentionally add `--force`.
+The trust store is schema-validated, atomic, and locked while it is being
+updated. On macOS and Linux it also enforces owner-only permissions and
+no-follow file access. Windows relies on the user-profile ACL because Node does
+not expose the same POSIX ownership and no-follow guarantees there. Corrupt
+state fails closed. Resetting trust keeps a backup and requires confirmation
+unless you intentionally add `--force`.
 
 ## Development
 

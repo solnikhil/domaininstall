@@ -6,7 +6,7 @@ The project follows [Semantic Versioning](https://semver.org/) from its current
 pre-1.0 release line. Until 1.0, minor and patch releases may still refine the
 CLI and DNS record behavior, with compatibility notes called out explicitly.
 
-## [0.0.3] - Unreleased
+## [0.0.3] - 2026-07-27
 
 ### Added
 

@@ -36,8 +36,9 @@ Last reviewed 2026-07-25.
   distinct DNS outcomes for NODATA, NXDOMAIN, SERVFAIL, REFUSED, timeout,
   malformed response, and provider exhaustion, with fallback only where it is
   safe; refusal of conflicting mappings; schema-validated, fail-closed,
-  owner-only, symlink-safe, atomic, lock-protected TOFU store with documented
-  recovery; DNS version policy pinned separately from a CLI override; strict
+  POSIX owner-only, no-follow, atomic, lock-protected TOFU store with documented
+  recovery and explicit Windows ACL limitations; DNS version policy pinned
+  separately from a CLI override; strict
   argument parsing before any DNS, install, or pin operation; deterministic
   adversarial tests for each item.
 - **Milestone 2 — release engineering.** Deterministic tests separated from live

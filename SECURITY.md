@@ -39,6 +39,12 @@ than passing a command line through `cmd.exe`, so version ranges such as `^18`
 are never interpreted by a shell. These controls narrow execution risk; they do
 not make the selected package trustworthy.
 
+Trust-state hardening differs by platform. macOS and Linux enforce owner-only
+mode bits and use no-follow file opens. Windows rejects a symlinked state
+directory, validates the store, locks writers, and uses atomic replacement, but
+Node does not expose the same file-level no-follow and POSIX ownership
+guarantees; the store additionally relies on the user-profile directory ACL.
+
 ## Reporting a vulnerability
 
 Do not publish exploit details in a public issue.
