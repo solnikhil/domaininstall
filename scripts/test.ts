@@ -33,6 +33,13 @@ import {
   resolveNpmRegistry,
 } from "../dist/install.js";
 import { sanitizeTerminalText } from "../dist/terminal.js";
+import {
+  buildRecord,
+  buildRecordValue,
+  parsePackageSpec,
+  readmeSnippet,
+  REGISTRAR_NOTES,
+} from "../dist/setup.js";
 
 let pass = 0;
 let fail = 0;
@@ -575,6 +582,383 @@ globalThis.fetch = async () => new Response(JSON.stringify({
     exhausted.outcome === "provider_exhaustion" &&
       exhausted.attempts.map((attempt) => attempt.outcome).join(",") === "refused,malformed,timeout",
   );
+
+  console.log("\n10. Publisher setup, trust management, and JSON output");
+
+  // --- src/setup.ts record generation -------------------------------------
+  const plainValue = buildRecordValue("my-package");
+  check(
+    "setup builds a plain purl payload",
+    plainValue.ok && plainValue.value === "dnstall=pkg:npm/my-package",
+  );
+
+  const rangedValue = buildRecordValue("my-package@^2");
+  check(
+    "setup keeps a version range in the payload",
+    rangedValue.ok && rangedValue.value === "dnstall=pkg:npm/my-package@^2",
+  );
+
+  // A scoped name must be percent-encoded, because "@" separates the version in
+  // a purl. The generated record has to survive the real parser.
+  const scopedValue = buildRecordValue("@acme/widget@^2");
+  const scopedRoundTrip = scopedValue.ok ? parseRecord(scopedValue.value) : null;
+  check(
+    "setup percent-encodes a scope and round-trips through the record parser",
+    scopedValue.ok &&
+      scopedValue.value === "dnstall=pkg:npm/%40acme/widget@^2" &&
+      scopedRoundTrip?.package === "@acme/widget" &&
+      scopedRoundTrip?.version === "^2",
+  );
+
+  const unscopedRoundTrip = plainValue.ok ? parseRecord(plainValue.value) : null;
+  check(
+    "a generated plain record round-trips through the parser",
+    unscopedRoundTrip?.namespace === "npm" && unscopedRoundTrip?.package === "my-package",
+  );
+
+  check("setup rejects a flag-like package name", !buildRecordValue("--registry=evil").ok);
+  check("setup rejects an empty package", !buildRecordValue("   ").ok);
+  check("setup rejects an invalid version range", !buildRecordValue("pkg@$(id)").ok);
+
+  const record = buildRecord("example.com", "my-package");
+  check(
+    "setup exposes both the full record name and the host-only form",
+    record.ok &&
+      record.value.name === "_dnstall.example.com" &&
+      record.value.host === "_dnstall" &&
+      record.value.type === "TXT" &&
+      record.value.quotedValue === '"dnstall=pkg:npm/my-package"' &&
+      record.value.zoneLine === '_dnstall.example.com.  IN  TXT  "dnstall=pkg:npm/my-package"',
+  );
+
+  const subRecord = buildRecord("example.com", "widget", "react");
+  check(
+    "setup places a sub-package under its own label",
+    subRecord.ok &&
+      subRecord.value.name === "_dnstall.react.example.com" &&
+      subRecord.value.host === "_dnstall.react",
+  );
+
+  check("setup rejects an invalid domain", !buildRecord("not-a-domain", "pkg").ok);
+
+  const spec = parsePackageSpec("@acme/widget@~1.2");
+  check(
+    "package specs split scope from version",
+    spec.ok && spec.value.package === "@acme/widget" && spec.value.version === "~1.2",
+  );
+
+  const snippet = readmeSnippet("example.com", "my-package");
+  check(
+    "the README snippet documents both install and verify",
+    snippet.ok && snippet.value.includes("di example.com") && snippet.value.includes("di verify example.com"),
+  );
+
+  check(
+    "registrar guidance covers the major hosts",
+    REGISTRAR_NOTES.length >= 6 &&
+      REGISTRAR_NOTES.some((entry) => entry.registrar === "Cloudflare") &&
+      REGISTRAR_NOTES.every((entry) => entry.note.length > 0),
+  );
+
+  // --- argument parsing for the new commands ------------------------------
+  const verifyJsonArgs = parseCliArgs(["verify", "example.com", "--json"]);
+  check(
+    "verify accepts --json",
+    verifyJsonArgs.ok &&
+      verifyJsonArgs.command.kind === "verify" &&
+      verifyJsonArgs.command.json === true,
+  );
+  check(
+    "verify still refuses unrelated options",
+    !parseCliArgs(["verify", "example.com", "--global"]).ok,
+  );
+  const listArgs = parseCliArgs(["trust", "list"]);
+  check(
+    "trust list parses without options",
+    listArgs.ok && listArgs.command.kind === "trust_list" && listArgs.command.json === false,
+  );
+  const forgetArgs = parseCliArgs(["trust", "forget", "example.com"]);
+  check(
+    "trust forget parses one domain",
+    forgetArgs.ok &&
+      forgetArgs.command.kind === "trust_forget" &&
+      forgetArgs.command.domain === "example.com",
+  );
+  check("trust forget requires a domain", !parseCliArgs(["trust", "forget"]).ok);
+  check("trust forget refuses options", !parseCliArgs(["trust", "forget", "example.com", "--force"]).ok);
+  check("an unknown trust subcommand is refused", !parseCliArgs(["trust", "nuke"]).ok);
+  check("trust reset still requires --all", !parseCliArgs(["trust", "reset"]).ok);
+  const setupArgs = parseCliArgs(["setup", "example.com", "my-package"]);
+  check(
+    "setup parses a domain and package",
+    setupArgs.ok &&
+      setupArgs.command.kind === "setup" &&
+      setupArgs.command.target === "example.com" &&
+      setupArgs.command.package === "my-package",
+  );
+  check("setup requires a package argument", !parseCliArgs(["setup", "example.com"]).ok);
+  check("setup refuses unrelated options", !parseCliArgs(["setup", "example.com", "pkg", "-g"]).ok);
+
+  // --- the new commands end to end ---------------------------------------
+  const cmdRoot = mkdtempSync(join(tmpdir(), "dnstall-cmds-"));
+
+  const setupHuman = spawnSync(process.execPath, [cli, "setup", "example.com", "my-package"], {
+    encoding: "utf8",
+  });
+  check(
+    "di setup prints the record, the host-only form, and registrar guidance",
+    setupHuman.status === 0 &&
+      setupHuman.stdout.includes("_dnstall.example.com") &&
+      setupHuman.stdout.includes('"dnstall=pkg:npm/my-package"') &&
+      setupHuman.stdout.includes("Cloudflare") &&
+      setupHuman.stdout.includes("di verify example.com"),
+  );
+
+  const setupJson = spawnSync(process.execPath, [cli, "setup", "example.com", "my-package", "--json"], {
+    encoding: "utf8",
+  });
+  let setupPayload: { record?: { name?: string; value?: string }; registrars?: unknown[] } = {};
+  let setupParsed = false;
+  try {
+    setupPayload = JSON.parse(setupJson.stdout) as typeof setupPayload;
+    setupParsed = true;
+  } catch {
+    setupParsed = false;
+  }
+  check(
+    "di setup --json emits a single parseable object",
+    setupJson.status === 0 &&
+      setupParsed &&
+      setupPayload.record?.name === "_dnstall.example.com" &&
+      setupPayload.record?.value === "dnstall=pkg:npm/my-package" &&
+      Array.isArray(setupPayload.registrars),
+  );
+
+  const setupBad = spawnSync(process.execPath, [cli, "setup", "example.com", "--registry=evil"], {
+    encoding: "utf8",
+  });
+  check(
+    "di setup refuses a flag-like package without printing a record",
+    setupBad.status === 1 && !setupBad.stdout.includes("dnstall="),
+  );
+
+  // Seed two pins so forgetting one can be shown not to disturb the other.
+  const trustState = join(cmdRoot, "trust-state");
+  mkdirSync(trustState, { mode: 0o700 });
+  const seededAt = new Date().toISOString();
+  const seedPin = (pkg: string) => ({
+    namespace: "npm",
+    package: pkg,
+    registry: "https://registry.npmjs.org/",
+    dnsVersion: null,
+    firstSeen: seededAt,
+    lastSeen: seededAt,
+  });
+  writeFileSync(
+    join(trustState, "pins.json"),
+    JSON.stringify({
+      version: 1,
+      pins: { "alpha.example": seedPin("alpha-pkg"), "beta.example": seedPin("beta-pkg") },
+    }),
+    { mode: 0o600 },
+  );
+  const trustEnv = { ...process.env, DOMAININSTALL_STATE_DIR: trustState };
+
+  const listHuman = spawnSync(process.execPath, [cli, "trust", "list"], {
+    encoding: "utf8",
+    env: trustEnv,
+  });
+  check(
+    "di trust list shows every pinned domain",
+    listHuman.status === 0 &&
+      listHuman.stdout.includes("alpha.example") &&
+      listHuman.stdout.includes("beta.example") &&
+      listHuman.stdout.includes("alpha-pkg"),
+  );
+
+  const listJson = spawnSync(process.execPath, [cli, "trust", "list", "--json"], {
+    encoding: "utf8",
+    env: trustEnv,
+  });
+  let listPayload: { pins?: { domain: string }[] } = {};
+  let listParsed = false;
+  try {
+    listPayload = JSON.parse(listJson.stdout) as typeof listPayload;
+    listParsed = true;
+  } catch {
+    listParsed = false;
+  }
+  check(
+    "di trust list --json emits pins sorted by domain",
+    listJson.status === 0 &&
+      listParsed &&
+      listPayload.pins?.map((entry) => entry.domain).join(",") === "alpha.example,beta.example",
+  );
+
+  const forgetOne = spawnSync(process.execPath, [cli, "trust", "forget", "alpha.example"], {
+    encoding: "utf8",
+    env: trustEnv,
+  });
+  const afterForget = JSON.parse(readFileSync(join(trustState, "pins.json"), "utf8")) as {
+    version?: number;
+    pins?: Record<string, unknown>;
+  };
+  check(
+    "di trust forget removes only the named domain and keeps the store valid",
+    forgetOne.status === 0 &&
+      afterForget.version === 1 &&
+      afterForget.pins !== undefined &&
+      !Object.hasOwn(afterForget.pins, "alpha.example") &&
+      Object.hasOwn(afterForget.pins, "beta.example"),
+  );
+
+  const forgetMissing = spawnSync(process.execPath, [cli, "trust", "forget", "nothing.example"], {
+    encoding: "utf8",
+    env: trustEnv,
+  });
+  check(
+    "di trust forget reports an unknown domain instead of failing silently",
+    forgetMissing.status === 1 && forgetMissing.stderr.includes("nothing.example"),
+  );
+
+  const forgetInvalid = spawnSync(process.execPath, [cli, "trust", "forget", "not-a-domain"], {
+    encoding: "utf8",
+    env: trustEnv,
+  });
+  check(
+    "di trust forget validates the domain before touching trust state",
+    forgetInvalid.status === 1 && forgetInvalid.stdout === "",
+  );
+
+  // --- verify --json against a mocked resolver ----------------------------
+  const verifyMock = join(cmdRoot, "verify-dns.mjs");
+  writeFileSync(
+    verifyMock,
+    `globalThis.fetch = async () => new Response(JSON.stringify({
+  Status: 0,
+  AD: true,
+  Answer: [{ type: 16, data: '"dnstall=pkg:npm/safe-package"' }]
+}), { status: 200, headers: { "content-type": "application/json" } });
+`,
+  );
+  const verifyMockUrl = pathToFileURL(verifyMock).href;
+  const verifyState = join(cmdRoot, "verify-state");
+  const verifyJsonRun = spawnSync(
+    process.execPath,
+    ["--import", verifyMockUrl, cli, "verify", "example.com", "--json"],
+    { encoding: "utf8", env: { ...process.env, DOMAININSTALL_STATE_DIR: verifyState } },
+  );
+  let verifyPayload: {
+    schema?: number;
+    domain?: string;
+    dnsName?: string;
+    outcome?: string;
+    valid?: boolean;
+    mapping?: { package?: string; version?: string | null };
+    pin?: unknown;
+    records?: string[];
+  } = {};
+  let verifyParsed = false;
+  try {
+    verifyPayload = JSON.parse(verifyJsonRun.stdout) as typeof verifyPayload;
+    verifyParsed = true;
+  } catch {
+    verifyParsed = false;
+  }
+  check(
+    "di verify --json emits one machine-readable object on stdout",
+    verifyJsonRun.status === 0 &&
+      verifyParsed &&
+      verifyPayload.schema === 1 &&
+      verifyPayload.domain === "example.com" &&
+      verifyPayload.dnsName === "_dnstall.example.com" &&
+      verifyPayload.outcome === "answer" &&
+      verifyPayload.valid === true &&
+      verifyPayload.mapping?.package === "safe-package" &&
+      verifyPayload.mapping?.version === null &&
+      verifyPayload.pin === null &&
+      verifyPayload.records?.[0] === "dnstall=pkg:npm/safe-package",
+  );
+  check(
+    "di verify --json keeps human formatting out of stdout",
+    !verifyJsonRun.stdout.includes("Looking up") && !verifyJsonRun.stdout.includes("Record looks valid"),
+  );
+
+  const verifyHumanRun = spawnSync(
+    process.execPath,
+    ["--import", verifyMockUrl, cli, "verify", "example.com"],
+    { encoding: "utf8", env: { ...process.env, DOMAININSTALL_STATE_DIR: join(cmdRoot, "human-state") } },
+  );
+  check(
+    "di verify without --json still prints the human report",
+    verifyHumanRun.status === 0 &&
+      verifyHumanRun.stdout.includes("Looking up") &&
+      verifyHumanRun.stdout.includes("Record looks valid"),
+  );
+
+  // NODATA has to stay machine-readable too, since that is the state a publisher
+  // sees while their new record propagates.
+  const nodataMock = join(cmdRoot, "nodata-dns.mjs");
+  writeFileSync(
+    nodataMock,
+    `globalThis.fetch = async () => new Response(JSON.stringify({ Status: 0, Answer: [] }),
+  { status: 200, headers: { "content-type": "application/json" } });
+`,
+  );
+  const nodataRun = spawnSync(
+    process.execPath,
+    ["--import", pathToFileURL(nodataMock).href, cli, "verify", "example.com", "--json"],
+    { encoding: "utf8", env: { ...process.env, DOMAININSTALL_STATE_DIR: join(cmdRoot, "nodata-state") } },
+  );
+  let nodataPayload: { outcome?: string; valid?: boolean; error?: string | null } = {};
+  let nodataParsed = false;
+  try {
+    nodataPayload = JSON.parse(nodataRun.stdout) as typeof nodataPayload;
+    nodataParsed = true;
+  } catch {
+    nodataParsed = false;
+  }
+  check(
+    "di verify --json reports NODATA as structured data",
+    nodataRun.status === 1 &&
+      nodataParsed &&
+      nodataPayload.outcome === "nodata" &&
+      nodataPayload.valid === false &&
+      typeof nodataPayload.error === "string",
+  );
+
+  // --- the package-manager escape hatch ----------------------------------
+  const pnpmProject = join(cmdRoot, "pnpm-project");
+  mkdirSync(pnpmProject);
+  writeFileSync(join(pnpmProject, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  const pnpmRefusal = detectNpmProject(pnpmProject);
+  check(
+    "a pnpm project is refused with a pointer to the global install that works",
+    !pnpmRefusal.ok &&
+      pnpmRefusal.error.includes("pnpm-lock.yaml") &&
+      pnpmRefusal.error.includes("--global"),
+  );
+
+  const yarnProject = join(cmdRoot, "yarn-project");
+  mkdirSync(yarnProject);
+  writeFileSync(join(yarnProject, "package.json"), JSON.stringify({ packageManager: "yarn@4.0.0" }));
+  const yarnRefusal = detectNpmProject(yarnProject);
+  check(
+    "a declared non-npm packageManager is refused with the same pointer",
+    !yarnRefusal.ok && yarnRefusal.error.includes("yarn@4.0.0") && yarnRefusal.error.includes("--global"),
+  );
+
+  const helpText = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+  check(
+    "--help documents the new commands and the pnpm/Yarn/Bun escape hatch",
+    helpText.stdout.includes("di setup") &&
+      helpText.stdout.includes("trust list") &&
+      helpText.stdout.includes("trust forget") &&
+      helpText.stdout.includes("--json") &&
+      helpText.stdout.includes("pnpm"),
+  );
+
+  rmSync(cmdRoot, { recursive: true, force: true });
 
   rmSync(state, { recursive: true, force: true });
 

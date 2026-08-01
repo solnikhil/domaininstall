@@ -40,6 +40,11 @@ export interface PinChange {
   now: string;
 }
 
+export interface PinEntry {
+  domain: string;
+  pin: Pin;
+}
+
 export class PinStoreError extends Error {
   override readonly name = "PinStoreError";
 
@@ -314,6 +319,14 @@ export function getPin(domain: string): Pin | undefined {
   return load()[domain];
 }
 
+/** Every stored pin with its domain, sorted alphabetically by domain for stable output. */
+export function listPins(): PinEntry[] {
+  const store = load();
+  return Object.entries(store)
+    .map(([domain, pin]) => ({ domain, pin }))
+    .sort((a, b) => (a.domain < b.domain ? -1 : a.domain > b.domain ? 1 : 0));
+}
+
 export function diffPin(
   domain: string,
   next: { namespace: string; package: string; registry: string; dnsVersion: string | null },
@@ -357,7 +370,16 @@ export function savePin(
   });
 }
 
-/** Preserve the old file as a backup, then create a valid empty v1 store. */
+/** Remove one domain's pin. Returns true if a pin existed and was removed, false otherwise. */
+export function forgetPin(domain: string): boolean {
+  return withLock(() => {
+    const store = load();
+    if (!Object.hasOwn(store, domain)) return false;
+    delete store[domain];
+    writeAtomically(store);
+    return true;
+  });
+}
 export function resetPinStore(): string | null {
   return withLock(() => {
     let backup: string | null = null;

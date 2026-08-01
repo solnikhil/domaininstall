@@ -131,7 +131,7 @@ export function detectNpmProject(cwd = process.cwd()): NpmProjectResult {
   if (incompatibleLocks.length > 0) {
     return {
       ok: false,
-      error: `The current alpha only supports npm; found ${incompatibleLocks.join(", ")}.`,
+      error: `Project installs in the current alpha support npm only; found ${incompatibleLocks.join(", ")}. Run di <domain> --global to install regardless of this project's package manager, since a global install does not touch this project.`,
     };
   }
 
@@ -148,7 +148,7 @@ export function detectNpmProject(cwd = process.cwd()): NpmProjectResult {
       if (typeof packageManager === "string" && !packageManager.startsWith("npm@")) {
         return {
           ok: false,
-          error: `The current alpha only supports npm; package.json declares ${packageManager}.`,
+          error: `Project installs in the current alpha support npm only; package.json declares ${packageManager}. Run di <domain> --global to install regardless of this project's package manager, since a global install does not touch this project.`,
         };
       }
     } else return { ok: false, error: "package.json must contain a JSON object." };

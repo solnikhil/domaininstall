@@ -6,6 +6,24 @@ The project follows [Semantic Versioning](https://semver.org/) from its current
 pre-1.0 release line. Until 1.0, minor and patch releases may still refine the
 CLI and DNS record behavior, with compatibility notes called out explicitly.
 
+## [Unreleased]
+
+### Added
+
+- `di setup <domain> <package>[@range]` prints the exact TXT record a publisher
+  must create, in fully-qualified, host-only, and zone-file forms, with
+  per-registrar guidance, a DNS propagation note, and a README snippet.
+- `di trust list` shows every remembered domain mapping.
+- `di trust forget <domain>` forgets one domain instead of all of them.
+- `--json` output for `di verify`, `di setup`, and `di trust list`, carrying a
+  versioned `schema` field so CI, bots, and agents can depend on the shape.
+
+### Changed
+
+- When a project install is refused because the project uses pnpm, Yarn, or Bun,
+  the message now points at `di <domain> --global`, which already works in those
+  projects because a global install does not read the project directory.
+
 ## [0.0.3] - 2026-07-27
 
 ### Added

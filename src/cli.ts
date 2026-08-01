@@ -19,15 +19,18 @@ import {
   DNS_PREFIX,
   type DnstallRecord,
 } from "./record.js";
-import { parseTarget, validatePackageName, validateVersionRange } from "./validate.js";
+import { parseTarget, validateDomain, validatePackageName, validateVersionRange } from "./validate.js";
 import {
   diffPin,
+  forgetPin,
+  listPins,
   savePin,
   getPin,
   resetPinStore,
   PIN_FILE,
   type PinChange,
 } from "./pin.js";
+import { buildRecord, readmeSnippet, REGISTRAR_NOTES } from "./setup.js";
 import {
   detectNpmProject,
   buildInstallPlan,
@@ -286,113 +289,222 @@ async function cmdInstall(target: string, opts: { yes: boolean; global: boolean 
   return code;
 }
 
-async function cmdVerify(target: string): Promise<number> {
+/**
+ * Machine-readable `verify` output.
+ *
+ * `schema` is versioned so CI, bots, and agents can depend on this shape and
+ * detect a change rather than silently misreading it.
+ */
+interface VerifyJson {
+  schema: 1;
+  domain: string | null;
+  dnsName: string | null;
+  resolver: string | null;
+  outcome: string | null;
+  dnssecAuthenticated: boolean;
+  attempts: { resolver: string; outcome: string; status?: number }[];
+  records: string[];
+  mapping: {
+    namespace: string;
+    package: string;
+    version: string | null;
+    metadata: Record<string, string>;
+  } | null;
+  registry: string | null;
+  pin: {
+    namespace: string;
+    package: string;
+    registry: string;
+    dnsVersion: string | null;
+    firstSeen: string;
+    lastSeen: string;
+  } | null;
+  pinFile: string;
+  valid: boolean;
+  error: string | null;
+}
+
+async function cmdVerify(target: string, json: boolean): Promise<number> {
+  const payload: VerifyJson = {
+    schema: 1,
+    domain: null,
+    dnsName: null,
+    resolver: null,
+    outcome: null,
+    dnssecAuthenticated: false,
+    attempts: [],
+    records: [],
+    mapping: null,
+    registry: null,
+    pin: null,
+    pinFile: PIN_FILE,
+    valid: false,
+    error: null,
+  };
+
+  // In JSON mode stdout carries the payload and nothing else, so every human
+  // line is suppressed. Diagnostics stay on stderr either way.
+  const say = (msg: string): void => {
+    if (!json) info(msg);
+  };
+  const finish = (code: number): number => {
+    if (json) info(JSON.stringify(payload, null, 2));
+    return code;
+  };
+  const refuse = (message: string, code = 1): number => {
+    payload.error = message;
+    payload.valid = false;
+    error(message);
+    return finish(code);
+  };
+
   const parsed = parseTarget(target);
   if (!parsed.ok) {
+    payload.error = parsed.error;
     error(parsed.error);
-    return 1;
+    return finish(1);
   }
   const { domain, sub } = parsed.value;
   const effectiveDomain = sub ? `${sub}.${domain}` : domain;
   const dnsName = `_${DNS_PREFIX}.${effectiveDomain}`;
+  payload.domain = effectiveDomain;
+  payload.dnsName = dnsName;
 
-  info(`\n  Looking up ${c.cyan(dnsName)} ...\n`);
+  say(`\n  Looking up ${c.cyan(dnsName)} ...\n`);
   const txt = await resolveTxt(DNS_PREFIX, effectiveDomain);
 
-  if (txt.provider) info(c.dim(`  resolver:  ${resolverName(txt.provider)}`));
-  info(c.dim(`  outcome:   ${txt.outcome}`));
-  printResolverAttempts(txt.attempts);
-  info(`  ${dnssecBadge(txt.authenticated)}`);
-  info("");
+  payload.outcome = txt.outcome;
+  payload.dnssecAuthenticated = txt.authenticated;
+  payload.records = [...txt.records];
+  if (txt.provider) payload.resolver = resolverName(txt.provider);
+  payload.attempts = txt.attempts.map((attempt) => {
+    const entry: { resolver: string; outcome: string; status?: number } = {
+      resolver: resolverName(attempt.provider),
+      outcome: attempt.outcome,
+    };
+    if (attempt.status !== undefined) entry.status = attempt.status;
+    return entry;
+  });
+
+  if (txt.provider) say(c.dim(`  resolver:  ${resolverName(txt.provider)}`));
+  say(c.dim(`  outcome:   ${txt.outcome}`));
+  if (!json) printResolverAttempts(txt.attempts);
+  say(`  ${dnssecBadge(txt.authenticated)}`);
+  say("");
 
   if (txt.outcome === "provider_exhaustion") {
-    error("DNS lookup failed after exhausting every configured resolver.");
-    return 1;
+    return refuse("DNS lookup failed after exhausting every configured resolver.");
   }
 
   if (txt.outcome === "nxdomain" || txt.outcome === "nodata") {
-    error(
+    const message =
       txt.outcome === "nxdomain"
         ? "The requested DNS name does not exist (NXDOMAIN)."
-        : "The DNS name exists but has no TXT answer (NODATA).",
-    );
-    info(
+        : "The DNS name exists but has no TXT answer (NODATA).";
+    payload.error = message;
+    error(message);
+    say(
       `\n  To enable it, publish:\n    ${c.dim(`${dnsName}  TXT  "dnstall=pkg:npm/<package>"`)}\n`,
     );
-    return 1;
+    if (!json) {
+      info(`  Or generate it: ${c.bold(`di setup ${effectiveDomain} <package>`)}\n`);
+    }
+    return finish(1);
   }
 
-  info(c.dim("  raw TXT records:"));
-  for (const rec of txt.records) info(`    ${sanitizeTerminalText(rec)}`);
-  info("");
+  say(c.dim("  raw TXT records:"));
+  for (const rec of txt.records) say(`    ${sanitizeTerminalText(rec)}`);
+  say("");
 
   const records = parseRecords(txt.records);
   if (records.length === 0) {
+    payload.error = "TXT records exist, but none are valid domaininstall records.";
     warn("TXT records exist, but none are valid domaininstall records.");
-    return 1;
+    return finish(1);
   }
 
-  for (const rec of records) {
-    const supported = rec.namespace === NAMESPACE;
-    info(
-      `  ${supported ? c.green("●") : c.yellow("○")} ${c.bold(rec.package)}` +
-        `  ${c.dim(`(${rec.namespace}${rec.version ? " @ " + rec.version : ""})`)}` +
-        (supported ? "" : c.dim("  — namespace not supported in v0")),
-    );
+  if (!json) {
+    for (const rec of records) {
+      const supported = rec.namespace === NAMESPACE;
+      info(
+        `  ${supported ? c.green("●") : c.yellow("○")} ${c.bold(rec.package)}` +
+          `  ${c.dim(`(${rec.namespace}${rec.version ? " @ " + rec.version : ""})`)}` +
+          (supported ? "" : c.dim("  — namespace not supported in v0")),
+      );
+    }
   }
 
   const supportedMappings = distinctRecordMappings(
     records.filter((record) => record.namespace === NAMESPACE),
   );
   if (supportedMappings.length > 1) {
-    info("");
-    error("Conflicting supported mappings found; installation would be refused.");
-    return 1;
+    say("");
+    return refuse("Conflicting supported mappings found; installation would be refused.");
   }
   if (supportedMappings.length === 0) {
-    info("");
+    say("");
+    payload.error = "No mapping uses the npm namespace supported by this alpha.";
     warn("No mapping uses the npm namespace supported by this alpha.");
-    return 1;
+    return finish(1);
   }
   const supportedRecord = supportedMappings[0]!;
   const packageCheck = validatePackageName(supportedRecord.package);
   if (!packageCheck.ok) {
-    error(`The npm mapping contains an invalid package name: ${packageCheck.error}`);
-    return 1;
+    return refuse(`The npm mapping contains an invalid package name: ${packageCheck.error}`);
   }
   if (supportedRecord.version) {
     const versionCheck = validateVersionRange(supportedRecord.version);
     if (!versionCheck.ok) {
-      error(`The npm mapping contains an invalid version policy: ${versionCheck.error}`);
-      return 1;
+      return refuse(`The npm mapping contains an invalid version policy: ${versionCheck.error}`);
     }
   }
+
+  payload.mapping = {
+    namespace: supportedRecord.namespace,
+    package: supportedRecord.package,
+    version: supportedRecord.version ?? null,
+    metadata: { ...supportedRecord.metadata },
+  };
 
   // A scoped package is the one case where local npm configuration can send the
   // install somewhere other than the default registry, so say so before install.
   if (npmScopeOf(supportedRecord.package)) {
     const effective = resolveEffectiveRegistry(supportedRecord.package);
     if (effective.ok) {
-      info(c.dim(`  registry for this package: ${effective.registry}`));
+      payload.registry = effective.registry;
+      say(c.dim(`  registry for this package: ${effective.registry}`));
     } else {
-      info("");
+      say("");
+      payload.error = effective.error;
       warn(effective.error);
     }
   }
 
   const pin = getPin(effectiveDomain);
-  info("");
   if (pin) {
-    info(c.dim(`  pin: first seen ${pin.firstSeen.slice(0, 10)} → ${pin.package} (${pin.namespace})`));
-    info(c.dim(`  pin DNS policy: ${pin.dnsVersion ?? "latest"}`));
-    info(c.dim(`  pin registry: ${pin.registry}`));
-  } else {
-    info(c.dim("  pin: none yet (will be recorded on first install)"));
+    payload.pin = {
+      namespace: pin.namespace,
+      package: pin.package,
+      registry: pin.registry,
+      dnsVersion: pin.dnsVersion,
+      firstSeen: pin.firstSeen,
+      lastSeen: pin.lastSeen,
+    };
   }
-  info(c.dim(`  pin file: ${PIN_FILE}`));
-  info("");
-  success("Record looks valid.");
-  return 0;
+  say("");
+  if (pin) {
+    say(c.dim(`  pin: first seen ${pin.firstSeen.slice(0, 10)} → ${pin.package} (${pin.namespace})`));
+    say(c.dim(`  pin DNS policy: ${pin.dnsVersion ?? "latest"}`));
+    say(c.dim(`  pin registry: ${pin.registry}`));
+  } else {
+    say(c.dim("  pin: none yet (will be recorded on first install)"));
+  }
+  say(c.dim(`  pin file: ${PIN_FILE}`));
+  say("");
+
+  payload.valid = true;
+  if (!json) success("Record looks valid.");
+  return finish(0);
 }
 
 async function cmdTrustReset(force: boolean): Promise<number> {
@@ -407,6 +519,158 @@ async function cmdTrustReset(force: boolean): Promise<number> {
   const backup = resetPinStore();
   if (backup) info(c.dim(`  previous trust state: ${backup}`));
   success("Trust state reset. Every domain will be treated as a new first use.");
+  return 0;
+}
+
+/** Show every remembered mapping, so a changed pin can be inspected in context. */
+function cmdTrustList(json: boolean): number {
+  const pins = listPins();
+
+  if (json) {
+    info(
+      JSON.stringify(
+        {
+          schema: 1,
+          pinFile: PIN_FILE,
+          pins: pins.map((entry) => ({ domain: entry.domain, ...entry.pin })),
+        },
+        null,
+        2,
+      ),
+    );
+    return 0;
+  }
+
+  if (pins.length === 0) {
+    info("");
+    info(c.dim("  No domains are pinned yet. The first install of a domain records one."));
+    info(c.dim(`  pin file: ${PIN_FILE}`));
+    info("");
+    return 0;
+  }
+
+  info("");
+  for (const { domain, pin } of pins) {
+    info(`  ${c.bold(sanitizeTerminalText(domain))}`);
+    info(`    ${c.dim("package")}     ${sanitizeTerminalText(pin.package)} ${c.dim(`(${pin.namespace})`)}`);
+    info(`    ${c.dim("DNS policy")}  ${pin.dnsVersion ?? c.dim("latest")}`);
+    info(`    ${c.dim("registry")}    ${sanitizeTerminalText(pin.registry)}`);
+    info(`    ${c.dim("first seen")}  ${pin.firstSeen.slice(0, 10)}`);
+    info("");
+  }
+  info(c.dim(`  ${pins.length} pinned domain${pins.length === 1 ? "" : "s"} in ${PIN_FILE}`));
+  info(c.dim(`  Forget one with ${c.bold("di trust forget <domain>")}`));
+  info("");
+  return 0;
+}
+
+/**
+ * Forget one domain instead of every domain.
+ *
+ * Without this, the only escape from an unexpected mapping change is
+ * `trust reset --all`, which discards trust history for every other domain too.
+ */
+function cmdTrustForget(domain: string): number {
+  const parsed = validateDomain(domain);
+  if (!parsed.ok) {
+    error(parsed.error);
+    return 1;
+  }
+
+  const removed = forgetPin(parsed.value);
+  if (!removed) {
+    warn(`No pin exists for ${parsed.value}; nothing to forget.`);
+    return 1;
+  }
+  success(`Forgot the pin for ${parsed.value}.`);
+  info(c.dim("  The next install of this domain is treated as a new first use."));
+  return 0;
+}
+
+/** Generate the DNS record a publisher has to create, with registrar guidance. */
+function cmdSetup(target: string, packageInput: string, json: boolean): number {
+  const parsed = parseTarget(target);
+  if (!parsed.ok) {
+    error(parsed.error);
+    return 1;
+  }
+  if (parsed.value.version) {
+    error("Put the version range on the package, not the domain: di setup example.com pkg@^2");
+    return 1;
+  }
+
+  const built = buildRecord(parsed.value.domain, packageInput, parsed.value.sub);
+  if (!built.ok) {
+    error(built.error);
+    return 1;
+  }
+  const record = built.value;
+  const verifyDomain = parsed.value.sub
+    ? `${parsed.value.domain}/${parsed.value.sub}`
+    : parsed.value.domain;
+
+  const snippet = readmeSnippet(parsed.value.domain, packageInput);
+
+  if (json) {
+    info(
+      JSON.stringify(
+        {
+          schema: 1,
+          domain: parsed.value.domain,
+          record: {
+            name: record.name,
+            host: record.host,
+            type: record.type,
+            value: record.value,
+            quotedValue: record.quotedValue,
+            zoneLine: record.zoneLine,
+          },
+          verifyCommand: `di verify ${verifyDomain}`,
+          registrars: REGISTRAR_NOTES,
+          readme: snippet.ok ? snippet.value : null,
+        },
+        null,
+        2,
+      ),
+    );
+    return 0;
+  }
+
+  info("");
+  info(`  Publish this DNS record on ${c.bold(sanitizeTerminalText(parsed.value.domain))}:`);
+  info("");
+  info(`  ${c.dim("type")}   ${c.bold(record.type)}`);
+  info(`  ${c.dim("name")}   ${c.bold(sanitizeTerminalText(record.name))}`);
+  info(`  ${c.dim("value")}  ${c.bold(sanitizeTerminalText(record.quotedValue))}`);
+  info("");
+  info(c.dim("  Most registrar forms want only the host part in the name field:"));
+  info(`    ${c.cyan(sanitizeTerminalText(record.host))}`);
+  info("");
+  info(c.dim("  Editing a zone file directly:"));
+  info(`    ${c.dim(sanitizeTerminalText(record.zoneLine))}`);
+  info("");
+  info(`  ${c.cyan("WHERE TO PUT IT")}`);
+  info("");
+  for (const entry of REGISTRAR_NOTES) {
+    info(`  ${c.bold(entry.registrar)}`);
+    info(`    ${c.dim(entry.note)}`);
+  }
+  info("");
+  info(`  ${c.cyan("THEN CONFIRM IT")}`);
+  info("");
+  info(`  DNS changes take a few minutes to propagate. When it has, run:`);
+  info(`    ${c.dim("$")} ${c.cyan(`di verify ${verifyDomain}`)}`);
+  info("");
+  info(c.dim("  Until it propagates, verify reports NODATA or NXDOMAIN. That is expected;"));
+  info(c.dim("  wait a minute and run it again rather than editing the record."));
+  info("");
+  if (snippet.ok) {
+    info(`  ${c.cyan("TELL YOUR USERS")}`);
+    info("");
+    info(c.dim("  Paste this into your README:"));
+    info("");
+    for (const line of snippet.value.split("\n")) info(`    ${line}`);
+  }
   return 0;
 }
 
@@ -441,7 +705,10 @@ ${c.bold("di")} — install a package by domain name
 
 ${c.dim("USAGE")}
   di <domain>[/sub][@version] [-g]           resolve, confirm, and install
-  di verify <domain>                         diagnose the DNS record (no install)
+  di verify <domain> [--json]                diagnose the DNS record (no install)
+  di setup <domain> <package>[@range]        generate the TXT record to publish
+  di trust list [--json]                     show every remembered mapping
+  di trust forget <domain>                   forget one domain's mapping
   di trust reset --all [--force]             back up and reset all TOFU pins
   domaininstall <domain>                     descriptive alias
   dnstall <domain>                           legacy short alias
@@ -452,13 +719,21 @@ ${c.dim("EXAMPLES")}
   di stripe.com@^18                  override the install version range
   di stripe.com --global             install globally instead of into this project
   di verify zuraai.xyz               check the record without installing
+  di verify zuraai.xyz --json        the same check as machine-readable JSON
+  di setup example.com my-package    print the record a publisher must publish
 
 ${c.dim("OPTIONS")}
   -y, --yes        skip the confirmation prompt (ignored if the mapping changed)
   -g, --global     install globally (npm install --global)
+  --json           machine-readable output (verify, setup, trust list)
   -h, --help       show this help
   -V, --version    show version
   --force          skip the trust-reset prompt (only with trust reset --all)
+
+${c.dim("PACKAGE MANAGERS")}
+  Project installs support npm only for now. A global install (-g) works in any
+  project, including pnpm, Yarn, and Bun ones, because it does not touch the
+  project directory.
 
 ${c.dim("HOW IT WORKS")}
   The domain owner publishes a TXT record:
@@ -491,9 +766,15 @@ async function main(): Promise<number> {
         global: parsed.command.global,
       });
     case "verify":
-      return cmdVerify(parsed.command.target);
+      return cmdVerify(parsed.command.target, parsed.command.json);
+    case "setup":
+      return cmdSetup(parsed.command.target, parsed.command.package, parsed.command.json);
     case "trust_reset":
       return cmdTrustReset(parsed.command.force);
+    case "trust_list":
+      return cmdTrustList(parsed.command.json);
+    case "trust_forget":
+      return cmdTrustForget(parsed.command.domain);
   }
 }
 

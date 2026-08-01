@@ -122,6 +122,10 @@ That command looks up `_dnstall.react.example.com`.
 di <domain>[/sub][@version]    resolve, confirm, and install
 di <domain> --global           install globally instead of into this project
 di verify <domain>             inspect a declaration without installing
+di verify <domain> --json      the same inspection as machine-readable JSON
+di setup <domain> <package>    print the TXT record a publisher must publish
+di trust list                  show every remembered domain mapping
+di trust forget <domain>       forget one domain's mapping
 di trust reset --all           back up and reset all saved mappings
 di --help                      show the complete command reference
 di --version                   print the CLI version
@@ -133,14 +137,44 @@ The npm package exposes `di` as the primary command, with `domaininstall` and
 Progress and previews go to standard output; warnings and errors go to standard
 error, so `di` composes with scripts and CI logs.
 
+## Publishing a mapping
+
+If you own a domain and want it to declare your package, `di setup` writes the
+record for you:
+
+```text
+di setup example.com example-package
+```
+
+It prints the record in the shapes different registrars ask for, notes the one
+step that usually goes wrong for each major DNS host, and gives you a README
+snippet to advertise the mapping. DNS takes a few minutes to propagate; until it
+does, `di verify` reports NODATA, which is expected rather than a mistake.
+
+## Machine-readable output
+
+`--json` works with `verify`, `setup`, and `trust list`. Human formatting is
+suppressed, so standard output carries one JSON object and nothing else:
+
+```bash
+di verify example.com --json
+```
+
+The payload includes a `schema` version, the resolver that answered, every
+resolver attempt, the raw TXT records, the resolved mapping, and the current pin.
+`verify` still exits non-zero when a record is missing or invalid, and the
+failure is reported as structured data rather than only as prose.
+
 ## Requirements and current limits
 
 - Node.js 22.14 or newer
 - npm available on `PATH`
 - macOS, Linux, or Windows
 
-The first release deliberately supports npm projects only. pnpm, Yarn, and Bun
-are refused until their install behavior has been tested to the same standard.
+The first release deliberately supports npm projects only for project installs.
+pnpm, Yarn, and Bun are refused there until their install behavior has been
+tested to the same standard. A global install (`--global`) works in any project,
+including those, because it never reads the project directory.
 
 Every install uses the effective HTTPS npm registry explicitly and includes
 `--ignore-scripts`. If a dependency needs a lifecycle script, review that step
