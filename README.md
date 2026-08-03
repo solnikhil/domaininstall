@@ -11,9 +11,11 @@ The idea is simple: a domain owner publishes a small DNS record that points to
 an npm package. `domaininstall` reads that record, shows you exactly what it
 found, and asks before installing anything.
 
-> **Release status:** available on npm. This is still an early release, so the
-> command and DNS format are intentionally small while real-world use shapes
-> what comes next.
+> **Release status:** npm currently serves `0.0.3`. The current source tree also
+> contains publisher setup, per-domain trust management, and JSON output planned
+> for `0.0.4`; those commands are marked below. This is still an early release,
+> so the command and DNS format remain intentionally small while real-world use
+> shapes what comes next.
 
 ## Install
 
@@ -116,16 +118,20 @@ di example.com/react
 
 That command looks up `_dnstall.react.example.com`.
 
+The [DNS record format](docs/RECORD-FORMAT.md) is the implementation-oriented
+reference for record location, scoped package encoding, version policy,
+metadata, duplicate and conflict handling, and producer/consumer conformance.
+
 ## Commands
 
 ```text
 di <domain>[/sub][@version]    resolve, confirm, and install
 di <domain> --global           install globally instead of into this project
 di verify <domain>             inspect a declaration without installing
-di verify <domain> --json      the same inspection as machine-readable JSON
-di setup <domain> <package>    print the TXT record a publisher must publish
-di trust list                  show every remembered domain mapping
-di trust forget <domain>       forget one domain's mapping
+di verify <domain> --json      machine-readable inspection (unreleased)
+di setup <domain> <package>    print the publisher TXT record (unreleased)
+di trust list                  show remembered mappings (unreleased)
+di trust forget <domain>       forget one mapping (unreleased)
 di trust reset --all           back up and reset all saved mappings
 di --help                      show the complete command reference
 di --version                   print the CLI version
@@ -207,6 +213,13 @@ npm run verify:package
 
 `npm test` uses deterministic, mocked DNS responses. The E2E command is kept
 separate because it performs a live DNS lookup and a real npm installation.
+
+## Documentation
+
+The [documentation index](docs/README.md) links the protocol reference,
+security boundary, roadmap, release runbook, changelog, and historical design
+material. The roadmap is the live source of project status; older release
+checklists are retained as snapshots.
 
 ## Security
 

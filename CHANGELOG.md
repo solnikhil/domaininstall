@@ -10,6 +10,9 @@ CLI and DNS record behavior, with compatibility notes called out explicitly.
 
 ### Added
 
+- An implementation-oriented v0 DNS record specification and documentation
+  index, so independent producers and consumers can implement `_dnstall`
+  without reverse-engineering the CLI.
 - `di setup <domain> <package>[@range]` prints the exact TXT record a publisher
   must create, in fully-qualified, host-only, and zone-file forms, with
   per-registrar guidance, a DNS propagation note, and a README snippet.

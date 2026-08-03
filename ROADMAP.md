@@ -129,6 +129,9 @@ Landed after `0.0.3`, not yet released. 109 deterministic tests pass.
 - [x] Tell pnpm, Yarn, and Bun users that `di <domain> --global` already works in
       their projects. The global path never ran project detection, so this was a
       message-only change to a working code path.
+- [x] Publish a v0 `_dnstall` record specification and documentation index, with
+      canonical producer output, compatibility input, conflict rules, and
+      conformance requirements separated from tutorial prose.
 - [ ] Release as `0.0.4`: changelog entry, tag, publish, GitHub release.
 
 ## Known gaps, in priority order
@@ -193,9 +196,11 @@ success criterion is publishers completing setup unaided.
    "only install packages declared by these domains", which turns the tool from
    a convenience into a control an organization can require. `--json` is the
    foundation this builds on.
-4. **The record specification as its own artifact.** A short spec page for the
-   `_dnstall` TXT format so other tools can implement it. This reframes the
-   project from one CLI to an interoperable convention.
+4. **The record specification as its own artifact.** The first implementation
+   spec now lives in `docs/RECORD-FORMAT.md`, covering canonical producer output,
+   consumer conflict handling, compatibility input, and conformance. The next
+   proof point is an independent consumer implementing it without importing the
+   CLI.
 5. **More ecosystems.** PyPI and crates.io reuse the same purl payload; add them
    only once one ecosystem has proven publisher demand.
 
