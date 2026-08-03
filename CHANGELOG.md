@@ -11,6 +11,9 @@ when that happens.
 
 ### Added
 
+- An implementation-oriented v0 DNS record specification and documentation
+  index, so independent producers and consumers can implement `_dnstall`
+  without reverse-engineering the CLI.
 - `di setup <domain>[/sub] <package>[@range]` prints the exact `_dnstall` TXT
   record a publisher needs to add, including the name relative to the zone, the
   fully-qualified name, and a zone-file line. The command runs entirely offline,

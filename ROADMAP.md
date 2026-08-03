@@ -343,10 +343,11 @@ every other bet stay behind the gate.
    packages declared by these domains” — which turns the tool from a convenience
    into a control an organization can require. *Done when it runs unattended in
    CI with deterministic exit codes and no TTY.*
-4. **The record specification as its own artifact.** A short spec page for the
-   `_dnstall` TXT format so other tools can implement it. Reframes the project
-   from one CLI into an interoperable convention. *Done when the spec is
-   versioned and separable from this implementation.*
+4. **The record specification as its own artifact.** The first implementation
+   spec now lives in `docs/RECORD-FORMAT.md`, covering canonical producer output,
+   consumer conflict handling, compatibility input, and conformance. The next
+   proof point is an independent consumer implementing it without importing the
+   CLI.
 5. **More ecosystems.** PyPI and crates.io reuse the same purl payload; add them
    only once one ecosystem has proven publisher demand.
 
