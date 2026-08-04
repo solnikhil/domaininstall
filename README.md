@@ -143,6 +143,10 @@ Publishing a mapping is a DNS TXT record and a quick check with
 [publisher guide](docs/m4/PUBLISHER-GUIDE.md). The project is in a quiet beta —
 if you maintain an npm package and want to try a domain mapping, start there.
 
+The [DNS record format](docs/RECORD-FORMAT.md) is the implementation-oriented
+reference for record location, scoped package encoding, version policy,
+metadata, duplicate and conflict handling, and producer/consumer conformance.
+
 ## Commands
 
 ```text
@@ -203,6 +207,13 @@ npm run verify:package
 
 `npm test` uses deterministic, mocked DNS responses. The E2E command is
 separate because it performs a live DNS lookup and a real npm installation.
+
+## Documentation
+
+The [documentation index](docs/README.md) links the protocol reference,
+security boundary, roadmap, release runbook, changelog, and historical design
+material. The roadmap is the live source of project status; older release
+checklists are retained as snapshots.
 
 ## Security
 
