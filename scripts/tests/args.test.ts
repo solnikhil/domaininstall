@@ -70,9 +70,24 @@ function run(h: Harness): void {
     trustForce.ok && trustForce.command.kind === "trust_reset" && trustForce.command.force,
   );
 
-  h.check("trust without reset fails", !parseCliArgs(["trust"]).ok);
-  h.check("trust list not supported", !parseCliArgs(["trust", "list"]).ok);
-  h.check("trust forget not supported", !parseCliArgs(["trust", "forget", "x.com"]).ok);
+  h.check("trust without subcommand fails", !parseCliArgs(["trust"]).ok);
+  const trustList = parseCliArgs(["trust", "list"]);
+  h.check("trust list supported", trustList.ok && trustList.command.kind === "trust_list");
+  const trustForget = parseCliArgs(["trust", "forget", "x.com"]);
+  h.check(
+    "trust forget supported",
+    trustForget.ok &&
+      trustForget.command.kind === "trust_forget" &&
+      trustForget.command.domain === "x.com" &&
+      !trustForget.command.force,
+  );
+  const trustForgetForce = parseCliArgs(["trust", "forget", "x.com", "--force"]);
+  h.check(
+    "trust forget force supported",
+    trustForgetForce.ok &&
+      trustForgetForce.command.kind === "trust_forget" &&
+      trustForgetForce.command.force,
+  );
   h.check("trust reset without --all fails", !parseCliArgs(["trust", "reset"]).ok);
   h.check("trust reset rejects --yes", !parseCliArgs(["trust", "reset", "--all", "--yes"]).ok);
   h.check("trust reset rejects -g", !parseCliArgs(["trust", "reset", "--all", "-g"]).ok);

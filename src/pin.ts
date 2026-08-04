@@ -340,15 +340,16 @@ export function listPins(): PinEntry[] {
 /**
  * Remove a single domain's pin, leaving every other mapping intact.
  *
- * Returns the removed pin, or undefined when the domain was not pinned. Taking
- * the same lock as savePin keeps a concurrent install from resurrecting the
- * entry between the read and the write.
+ * Returns the removed pin, or undefined when the domain disappeared or its
+ * security-relevant identity changed after the caller displayed it. The
+ * compare-and-delete happens under the same lock as savePin, so confirmation
+ * can never delete a different mapping written concurrently.
  */
-export function forgetPin(domain: string): Pin | undefined {
+export function forgetPin(domain: string, expectedExisting: Pin): Pin | undefined {
   return withLock(() => {
     const store = load();
     const existing = store[domain];
-    if (!existing) return undefined;
+    if (!existing || !pinIdentityEqual(existing, expectedExisting)) return undefined;
     delete store[domain];
     writeAtomically(store);
     return existing;

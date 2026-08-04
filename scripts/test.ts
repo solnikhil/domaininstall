@@ -372,12 +372,14 @@ process.stdout.write(JSON.stringify(listPins().map((pin) => [pin.domain, pin.pac
     );
     const forgotten = child(
       `import { forgetPin, getPin, listPins } from ${JSON.stringify(pinUrl)};
-const removed = forgetPin("alpha.example");
+const expected = getPin("alpha.example");
+if (!expected) throw new Error("expected alpha.example seed pin");
+const removed = forgetPin("alpha.example", expected);
 process.stdout.write(JSON.stringify({
   removedPackage: removed?.package ?? null,
   alphaStillPresent: getPin("alpha.example") !== undefined,
   survivors: listPins().map((pin) => pin.domain),
-  secondRemoval: forgetPin("alpha.example") ?? null,
+  secondRemoval: forgetPin("alpha.example", expected) ?? null,
 }));`,
     );
     const forgetResult = forgotten.status === 0
@@ -395,6 +397,19 @@ process.stdout.write(JSON.stringify({
         JSON.stringify(forgetResult.survivors) === JSON.stringify(["zeta.example"]),
     );
     check("forgetting an unknown domain reports nothing removed", forgetResult?.secondRemoval === null);
+    const compareDelete = child(
+      `import { forgetPin, getPin, savePin } from ${JSON.stringify(pinUrl)};
+const observed = getPin("zeta.example");
+if (!observed) throw new Error("missing seed pin");
+savePin("zeta.example", { namespace: "npm", package: "changed", registry: "https://registry.npmjs.org/", dnsVersion: null }, observed);
+const removed = forgetPin("zeta.example", observed);
+process.stdout.write(JSON.stringify({ removed: removed ?? null, current: getPin("zeta.example")?.package ?? null }));`,
+    );
+    check(
+      "forget compare-and-delete refuses a concurrently changed mapping",
+      compareDelete.status === 0 &&
+        compareDelete.stdout === JSON.stringify({ removed: null, current: "changed" }),
+    );
     check(
       "forget leaves a valid v1 store with no temp or lock files",
       (JSON.parse(readFileSync(join(listState, "pins.json"), "utf8")) as { version?: number }).version === 1 &&
@@ -637,7 +652,8 @@ process.stdout.write(JSON.stringify({
       "--eval",
       `import { savePin } from ${JSON.stringify(pinModule)};
 savePin("kept.example", { namespace: "npm", package: "kept", registry: "https://registry.npmjs.org/", dnsVersion: null });
-savePin("dropped.example", { namespace: "npm", package: "dropped", registry: "https://registry.npmjs.org/", dnsVersion: "^3" });`,
+savePin("dropped.example", { namespace: "npm", package: "dropped", registry: "https://registry.npmjs.org/", dnsVersion: "^3" });
+savePin("long.example", { namespace: "npm", package: "very-long-${"x".repeat(60)}", registry: "https://registry.npmjs.org/", dnsVersion: null });`,
     ],
     { env: { ...process.env, DOMAININSTALL_STATE_DIR: trustCliState } },
   );
@@ -645,11 +661,15 @@ savePin("dropped.example", { namespace: "npm", package: "dropped", registry: "ht
   check(
     "trust list shows each mapping with its policy",
     populatedList.status === 0 &&
-      populatedList.stdout.includes("2 remembered mappings") &&
+      populatedList.stdout.includes("3 remembered mappings") &&
       populatedList.stdout.includes("dropped.example") &&
       populatedList.stdout.includes("kept.example") &&
       populatedList.stdout.includes("^3") &&
       populatedList.stdout.includes("latest"),
+  );
+  check(
+    "trust list truncates oversized table cells instead of shifting later columns",
+    populatedList.stdout.includes("…") && !populatedList.stdout.includes(`very-long-${"x".repeat(60)}`),
   );
   const forgetUnknown = runTrustCli(["trust", "forget", "never-pinned.example", "--force"]);
   check(

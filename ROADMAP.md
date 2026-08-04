@@ -71,7 +71,7 @@ repository, or a local run — not inferred from an older review.
 | Published artifact | 12 files, 67 KB unpacked, zero production dependencies | Registry metadata; `npm run verify:package` |
 | Repository | Public; `main` is default and protected; `v0.0.3` tagged | Repository settings; `git tag -l` |
 | Retired branches | `feat/v0` is fully merged into `main` and retired — don’t branch from it | Merge history |
-| Deterministic suite | 122 passed (+ exhaustive suite), 0 failed | `npm test` on Node 22.14 |
+| Deterministic suite | 124 passed (+ exhaustive suite), 0 failed | `npm test` on Node 22.14 |
 | CI matrix | 6 jobs: `ubuntu` / `macos` / `windows-latest` × Node `22.14.0` / `24.x` | `.github/workflows/ci.yml` |
 | Live E2E | Linux, macOS, and Windows on Node 22.14; weekly cron, manual dispatch, and `v*` tags. Covers a project-scoped install, a global install into an isolated prefix, pin continuity, and `di verify` | `.github/workflows/e2e.yml`, `scripts/e2e.ts` |
 | Reference mapping | `_dnstall.zuraai.xyz` → `dnstall=pkg:npm/zuraai` resolves | Live E2E |

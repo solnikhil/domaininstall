@@ -536,6 +536,8 @@ function cmdTrustList(): number {
   const domainWidth = width([...rows.map((row) => row.domain), "domain"], 40);
   const packageWidth = width([...rows.map((row) => row.package), "package"], 32);
   const policyWidth = width([...rows.map((row) => row.policy), "policy"], 12);
+  const clip = (value: string, max: number): string =>
+    value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
 
   info("");
   info(`  ${pins.length} remembered mapping${pins.length === 1 ? "" : "s"}`);
@@ -548,9 +550,12 @@ function cmdTrustList(): number {
       ),
   );
   for (const row of rows) {
+    const domain = clip(row.domain, domainWidth);
+    const packageName = clip(row.package, packageWidth);
+    const policy = clip(row.policy, policyWidth);
     info(
-      `  ${row.domain.padEnd(domainWidth)}  ${row.package.padEnd(packageWidth)}  ` +
-        `${row.policy.padEnd(policyWidth)}  ${row.lastSeen}`,
+      `  ${domain.padEnd(domainWidth)}  ${packageName.padEnd(packageWidth)}  ` +
+        `${policy.padEnd(policyWidth)}  ${row.lastSeen}`,
     );
   }
   info("");
@@ -599,10 +604,10 @@ async function cmdTrustForget(domainInput: string, force: boolean): Promise<numb
     }
   }
 
-  const removed = forgetPin(domain);
+  const removed = forgetPin(domain, existing);
   if (!removed) {
-    // Only reachable if a concurrent process removed it first; report honestly.
-    error(`No remembered mapping for ${domain}; nothing was changed.`);
+    error(`The remembered mapping for ${domain} changed while you were confirming; nothing was removed.`);
+    info(`\n  Run ${c.bold("di trust list")} and review the current mapping before retrying.\n`);
     return 1;
   }
   success(`Forgot ${domain}. Other remembered mappings are unchanged.`);
