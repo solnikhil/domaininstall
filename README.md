@@ -93,6 +93,22 @@ domain’s policy.
 Keep using lockfiles, registry provenance, dependency review, and security
 scanning. They solve different parts of the problem.
 
+## Publishing a package from your own domain
+
+If you own a domain and an npm package, `di setup` prints the exact record to
+add at your DNS provider:
+
+```text
+di setup example.com my-package
+di setup example.com my-package@^2      declare a version policy
+di setup example.com/react @acme/ui     declare a sub-package
+```
+
+It runs entirely offline, so you can generate the record before it exists. It
+reports the name relative to your zone (what most DNS provider forms expect),
+the fully-qualified name, and a zone-file line. Once the record is live,
+`di verify example.com` confirms it resolves.
+
 ## DNS records
 
 The basic record lives at `_dnstall.<domain>`:
@@ -128,6 +144,7 @@ if you maintain an npm package and want to try a domain mapping, start there.
 di <domain>[/sub][@version]    resolve, confirm, and install
 di <domain> --global           install globally instead of into this project
 di verify <domain>             inspect a declaration without installing
+di setup <domain> <package>    print the TXT record a publisher must add
 di trust reset --all           back up and reset all saved mappings
 di --help                      show the complete command reference
 di --version                   print the CLI version

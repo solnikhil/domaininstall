@@ -7,6 +7,19 @@ pre-1.0 release line. Until 1.0, minor and patch releases may still refine the
 CLI and DNS record behavior — compatibility notes will be called out explicitly
 when that happens.
 
+## [Unreleased]
+
+### Added
+
+- `di setup <domain>[/sub] <package>[@range]` prints the exact `_dnstall` TXT
+  record a publisher needs to add, including the name relative to the zone, the
+  fully-qualified name, and a zone-file line. The command runs entirely offline,
+  so the record can be generated before it exists, and every generated record is
+  checked back through the record parser before being shown.
+- Live end-to-end coverage on macOS and Windows in addition to Linux, now
+  including a global install into an isolated npm prefix and a trust-pin
+  continuity check across two installs.
+
 ## [0.0.3] - 2026-07-27
 
 ### Added

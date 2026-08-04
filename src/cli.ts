@@ -20,6 +20,7 @@ import {
   type DnstallRecord,
 } from "./record.js";
 import { parseTarget, validatePackageName, validateVersionRange } from "./validate.js";
+import { buildSetupPlan } from "./setup.js";
 import {
   diffPin,
   savePin,
@@ -459,6 +460,54 @@ async function cmdVerify(target: string): Promise<number> {
   return 0;
 }
 
+/**
+ * Publisher onboarding. Offline by design: the record has to be written before
+ * it can be resolved, so this prints the record and hands off to `di verify`.
+ */
+function cmdSetup(target: string, packageSpec: string): number {
+  const built = buildSetupPlan(target, packageSpec);
+  if (!built.ok) {
+    error(built.error);
+    return 1;
+  }
+  const plan = built.value;
+
+  info("");
+  info(`  Declare ${c.bold(plan.package)} from ${c.bold(plan.zone)} with one TXT record.`);
+  info("");
+  info(`  ${c.dim("type")}   TXT`);
+  info(`  ${c.dim("name")}   ${c.bold(plan.relativeName)}   ${c.dim(`(relative to ${plan.zone})`)}`);
+  info(`  ${c.dim("value")}  ${c.cyan(plan.recordValue)}`);
+  info(`  ${c.dim("TTL")}    ${c.dim("300, or your provider's default")}`);
+  info("");
+  info(`  ${c.dim("full record name")}`);
+  info(`    ${plan.dnsName}`);
+  info("");
+  info(`  ${c.dim("zone-file form")}`);
+  info(`    ${plan.zoneFileLine}`);
+  info("");
+
+  if (!plan.version) {
+    info(`  ${c.dim("No version range declared, so installs resolve to the latest published")}`);
+    info(`  ${c.dim("version. To declare a policy instead, re-run with a range:")}`);
+    info(`    ${c.dim("$")} ${c.cyan(`di setup ${plan.verifyTarget} ${plan.package}@^1`)}`);
+    info("");
+  }
+
+  info(`  ${c.bold("Two things commonly go wrong")}`);
+  info(`    • Most providers expect the name ${c.bold("relative")} to the zone. Entering the`);
+  info(`      full name usually creates ${plan.dnsName}.${plan.zone} instead.`);
+  info(`    • Some providers add the surrounding quotes for you. The published value`);
+  info(`      should end up with exactly one set of quotes.`);
+  info("");
+  info("  Then confirm it, from any machine:");
+  info(`    ${c.dim("$")} ${c.cyan(`di verify ${plan.verifyTarget}`)}`);
+  info("");
+  info(c.dim("  DNS changes can take a few minutes to propagate."));
+  info("");
+  return 0;
+}
+
 async function cmdTrustReset(force: boolean): Promise<number> {
   warn("This removes every remembered domain mapping and resets trust-on-first-use state.");
   if (!force) {
@@ -497,6 +546,11 @@ ${c.cyan("OTHER WAYS TO USE IT")}
   ${c.cyan("di stripe.com@^18")}      request a version range
   ${c.cyan("di stripe.com -g")}       install globally, not into this project
 
+${c.cyan("PUBLISHING YOUR OWN PACKAGE")}
+
+  Own a domain and an npm package? Generate the DNS record for it:
+     ${c.dim("$")} ${c.cyan("di setup example.com my-package")}
+
   ${c.dim("Run")} ${c.bold("di --help")} ${c.dim("for every command and option.")}
 `;
 
@@ -506,6 +560,7 @@ ${c.bold("di")} — install a package by domain name
 ${c.dim("USAGE")}
   di <domain>[/sub][@version] [-g]           resolve, confirm, and install
   di verify <domain>                         diagnose the DNS record (no install)
+  di setup <domain>[/sub] <package>[@range]  print the TXT record to publish
   di trust reset --all [--force]             back up and reset all TOFU pins
   domaininstall <domain>                     descriptive alias
   dnstall <domain>                           legacy short alias
@@ -516,6 +571,8 @@ ${c.dim("EXAMPLES")}
   di stripe.com@^18                  override the install version range
   di stripe.com --global             install globally instead of into this project
   di verify zuraai.xyz               check the record without installing
+  di setup example.com my-package    generate the record a publisher must add
+  di setup example.com/react ui@^2   generate a sub-package record with a policy
 
 ${c.dim("OPTIONS")}
   -y, --yes        skip confirmation when the pin is unchanged (not a review of first use)
@@ -523,6 +580,10 @@ ${c.dim("OPTIONS")}
   -h, --help       show this help
   -V, --version    show version
   --force          skip the trust-reset prompt (only with trust reset --all)
+
+${c.dim("PUBLISHING")}
+  ${c.bold("di setup")} prints the exact record to add at your DNS provider, then
+  ${c.bold("di verify")} confirms it resolves. Neither command installs anything.
 
 ${c.dim("HOW IT WORKS")}
   The domain owner publishes a TXT record:
@@ -559,6 +620,8 @@ async function main(): Promise<number> {
       });
     case "verify":
       return cmdVerify(parsed.command.target);
+    case "setup":
+      return cmdSetup(parsed.command.target, parsed.command.packageSpec);
     case "trust_reset":
       return cmdTrustReset(parsed.command.force);
   }

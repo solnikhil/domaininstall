@@ -23,6 +23,7 @@ import { pathToFileURL } from "node:url";
 import { resolveTxt } from "../dist/doh.js";
 import { parseCliArgs } from "../dist/args.js";
 import { distinctRecordMappings, parseRecord, parseRecords } from "../dist/record.js";
+import { buildSetupPlan, encodePurlPackage, splitPackageSpec } from "../dist/setup.js";
 import { validatePackageName, parseTarget, validateDomain } from "../dist/validate.js";
 import {
   buildInstallPlan,
@@ -104,6 +105,82 @@ async function main() {
   check("rejects both -g and --global", !parseCliArgs(["example.com", "-g", "--global"]).ok);
   check("rejects --global on verify", !parseCliArgs(["verify", "example.com", "--global"]).ok);
   check("rejects --global on trust reset", !parseCliArgs(["trust", "reset", "--all", "--global"]).ok);
+
+  console.log("\n2b. Publisher record generation (di setup)");
+  const setupPlain = buildSetupPlan("example.com", "my-package");
+  check(
+    "generates a root record with the relative name providers expect",
+    setupPlain.ok &&
+      setupPlain.value.relativeName === "_dnstall" &&
+      setupPlain.value.dnsName === "_dnstall.example.com" &&
+      setupPlain.value.recordValue === "dnstall=pkg:npm/my-package" &&
+      setupPlain.value.verifyTarget === "example.com",
+  );
+  const setupRange = buildSetupPlan("example.com", "my-package@^2");
+  check(
+    "declares a version policy when one is supplied",
+    setupRange.ok &&
+      setupRange.value.version === "^2" &&
+      setupRange.value.recordValue === "dnstall=pkg:npm/my-package@^2",
+  );
+  const setupScoped = buildSetupPlan("example.com", "@acme/widget@~1.2");
+  check(
+    "purl-encodes a leading scope but keeps the inner slash literal",
+    setupScoped.ok &&
+      setupScoped.value.recordValue === "dnstall=pkg:npm/%40acme/widget@~1.2" &&
+      setupScoped.value.package === "@acme/widget",
+  );
+  const setupSub = buildSetupPlan("example.com/react", "@acme/react-widget");
+  check(
+    "a sub-package becomes an extra DNS label",
+    setupSub.ok &&
+      setupSub.value.relativeName === "_dnstall.react" &&
+      setupSub.value.dnsName === "_dnstall.react.example.com" &&
+      setupSub.value.verifyTarget === "example.com/react",
+  );
+  check(
+    "emits a quoted zone-file line",
+    setupSub.ok &&
+      setupSub.value.zoneFileLine ===
+        '_dnstall.react.example.com.  IN  TXT  "dnstall=pkg:npm/%40acme/react-widget"',
+  );
+  // The generator and the resolver must never disagree about the format.
+  const roundTrips = [
+    buildSetupPlan("example.com", "my-package"),
+    buildSetupPlan("example.com", "my-package@^2"),
+    buildSetupPlan("example.com", "@acme/widget@~1.2"),
+    buildSetupPlan("example.com/react", "@acme/react-widget"),
+  ].every((built) => {
+    if (!built.ok) return false;
+    const parsedBack = parseRecord(built.value.recordValue);
+    return (
+      parsedBack?.namespace === "npm" &&
+      parsedBack.package === built.value.package &&
+      parsedBack.version === built.value.version
+    );
+  });
+  check("every generated record parses back to the same mapping", roundTrips);
+  check("rejects a package name that could smuggle a flag", !buildSetupPlan("example.com", "--registry=evil").ok);
+  check("rejects an invalid domain", !buildSetupPlan("not-a-domain", "my-package").ok);
+  check("rejects an invalid version range", !buildSetupPlan("example.com", "my-package@ ^2").ok);
+  check("rejects an empty version range", !buildSetupPlan("example.com", "my-package@").ok);
+  check(
+    "rejects a version range on the domain instead of the package",
+    !buildSetupPlan("example.com@^2", "my-package").ok,
+  );
+  check("splits a scoped spec without treating the scope as a version", splitPackageSpec("@acme/widget").version === undefined);
+  check("encodes only a leading scope", encodePurlPackage("plain") === "plain" && encodePurlPackage("@a/b") === "%40a/b");
+  const setupArgs = parseCliArgs(["setup", "example.com", "my-package"]);
+  check(
+    "parses the setup command",
+    setupArgs.ok &&
+      setupArgs.command.kind === "setup" &&
+      setupArgs.command.target === "example.com" &&
+      setupArgs.command.packageSpec === "my-package",
+  );
+  check("setup requires both a domain and a package", !parseCliArgs(["setup", "example.com"]).ok);
+  check("setup rejects surplus positionals", !parseCliArgs(["setup", "example.com", "a", "b"]).ok);
+  check("setup rejects options", !parseCliArgs(["setup", "example.com", "my-package", "--yes"]).ok);
 
   console.log("\n3. Terminal output sanitization");
   const ansi = sanitizeTerminalText("safe\x1b[31mred\x1b[0m");
@@ -425,6 +502,34 @@ async function main() {
   );
   const globalHelp = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
   check("--help documents the global install flag", globalHelp.stdout.includes("--global"));
+  check("--help documents the setup command", globalHelp.stdout.includes("di setup <domain>"));
+  const setupRun = spawnSync(process.execPath, [cli, "setup", "example.com", "@acme/widget@^2"], {
+    encoding: "utf8",
+  });
+  check(
+    "setup prints the record, the relative name, and the verify follow-up",
+    setupRun.status === 0 &&
+      setupRun.stdout.includes("dnstall=pkg:npm/%40acme/widget@^2") &&
+      setupRun.stdout.includes("_dnstall.example.com") &&
+      setupRun.stdout.includes("di verify example.com") &&
+      setupRun.stderr === "",
+  );
+  const setupNoNetwork = spawnSync(process.execPath, [cli, "setup", "example.invalid", "pkg"], {
+    encoding: "utf8",
+    // A resolver reachable only through this variable would reveal a lookup.
+    env: { ...process.env, DOMAININSTALL_STATE_DIR: join(tmpdir(), "dnstall-setup-unused") },
+  });
+  check(
+    "setup performs no lookup and writes no trust state",
+    setupNoNetwork.status === 0 && !existsSync(join(tmpdir(), "dnstall-setup-unused")),
+  );
+  const setupInvalid = spawnSync(process.execPath, [cli, "setup", "example.com", "--registry=evil"], {
+    encoding: "utf8",
+  });
+  check(
+    "setup rejects a flag-shaped package name on stderr",
+    setupInvalid.status === 1 && setupInvalid.stdout === "" && setupInvalid.stderr.length > 0,
+  );
   const getStarted = spawnSync(process.execPath, [cli], { encoding: "utf8" });
   check(
     "no arguments shows the guided start flow",

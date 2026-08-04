@@ -4,6 +4,7 @@ export type CliCommand =
   | { kind: "version" }
   | { kind: "install"; target: string; yes: boolean; global: boolean }
   | { kind: "verify"; target: string }
+  | { kind: "setup"; target: string; packageSpec: string }
   | { kind: "trust_reset"; force: boolean };
 
 export type CliParseResult = { ok: true; command: CliCommand } | { ok: false; error: string };
@@ -58,6 +59,14 @@ export function parseCliArgs(args: string[]): CliParseResult {
     if (positionals.length !== 2) return { ok: false, error: "verify requires exactly one domain." };
     if (flags.length > 0) return { ok: false, error: "verify does not accept options." };
     return { ok: true, command: { kind: "verify", target: positionals[1]! } };
+  }
+
+  if (positionals[0] === "setup") {
+    if (positionals.length !== 3) {
+      return { ok: false, error: "usage: di setup <domain>[/sub] <package>[@range]" };
+    }
+    if (flags.length > 0) return { ok: false, error: "setup does not accept options." };
+    return { ok: true, command: { kind: "setup", target: positionals[1]!, packageSpec: positionals[2]! } };
   }
 
   if (positionals.length !== 1) return { ok: false, error: "Install requires exactly one domain target." };
