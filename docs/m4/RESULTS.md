@@ -31,7 +31,7 @@ Gates 2, 3, and 5 inform severity and sequencing but the written decision rule s
 | 5 | Usage | ≥10 external users; ≥25 successful uses; ≥5 repeat users | Users: ___ / 10<br>Uses: ___ / 25<br>Repeat: ___ / 5 | | | See § Gate 5 detail |
 | 6 | Comprehension | ≥80% pass critical item set (mapping ≠ package safety) | Completers: ___<br>Comprehend: ___<br>Rate: ___% | | | See § Gate 6 detail |
 
-**Overall M4 status:** ☐ Not started · ☑ In progress (kit ready; human gates incomplete) · ☐ Complete — continue CLI · ☐ Complete — pivot · ☐ Incomplete (stopped early)
+**Overall M4 status:** ☑ Not started · ☐ In progress · ☐ Complete — continue CLI · ☐ Complete — pivot · ☐ Incomplete (stopped early)
 
 ---
 
@@ -152,7 +152,11 @@ Protocol: [COMPREHENSION.md](./COMPREHENSION.md)
 
 ## Final decision
 
-Complete after all gates are Pass, Fail, or explicitly waived with written reason (waivers should be rare; do not waive 1 / 4 / 6 to force a “continue”).
+Complete a **Continue CLI** or **Pivot** decision after all gates are Pass or
+Fail, or after a non-hard-stop gate is explicitly waived with a written reason.
+Use **Hold / incomplete** when one or more gates lack enough evidence; an
+Incomplete non-hard-stop gate does not require a waiver. Gates 1, 4, and 6 are
+hard stops and may never be waived to force a Continue decision.
 
 ### Checklist
 

@@ -157,7 +157,12 @@ Publishers who added `_dnstall` may say “a user ran verify” without that use
 
 **Allowed with care:**
 
-- Count **at most one external user** and **at most one successful use** per independent anecdote that includes a **plausible, first-hand** report (e.g. “Alex on our team ran `di verify our.domain` and it showed `our-pkg`”).
+- Count **at most one external user** and **at most one successful use** per
+  independent anecdote that includes a **plausible, first-hand** report and a
+  deduplication key of `alleged_user + use_date` (e.g. “Alex on our team ran
+  `di verify our.domain` last Tuesday and it showed `our-pkg`”). If either part
+  of that key is unavailable, count the anecdote only when it cannot plausibly
+  match another anecdote or diary entry.
 - Prefer the **user** filing a diary entry when possible; anecdote is a fallback.
 
 **Do not:**
@@ -165,7 +170,8 @@ Publishers who added `_dnstall` may say “a user ran verify” without that use
 - Count page views, README badge impressions, or DNS query volume as successful uses (those are not verified human CLI successes).
 - Count the publisher verifying **their own** domain toward “external user” if they are only testing publish—unless they are not the domaininstall maintainer and clearly act as a consumer later.
 - Stack multiple vague “people tried it” comments into many uses without names/dates.
-- Double-count the same person via anecdote **and** diary.
+- Double-count the same `alleged_user + use_date` across publishers, anecdotes,
+  or diary entries.
 
 **Logging template for anecdotes:**
 
@@ -173,6 +179,7 @@ Publishers who added `_dnstall` may say “a user ran verify” without that use
 date_heard:
 source_publisher:
 alleged_user:
+use_date:
 domain:
 evidence_quality: first-hand / second-hand / vague
 counted_as: user_id? use_id? / not counted

@@ -27,7 +27,7 @@ If the **publisher**, **correctness**, or **comprehension** gates fail:
 
 - **Do not expand the CLI.**
 - Pivot toward an **agent/CI policy tool** or a **verification API** (fewer publishers required; a single org can adopt alone).
-- Record the pivot explicitly in ROADMAP §2 and §7 (see [Updating the roadmap](#updating-the-roadmap-§2-and-§7)).
+- Record the pivot explicitly in ROADMAP §2 and §7 (see [Updating the roadmap](#updating-the-roadmap-2-and-7)).
 
 Do not re-run the same beta with lower bars and call it a pass.
 
@@ -60,7 +60,10 @@ Optional engineering (“windows gate,” polish) is **not** a substitute for re
 ## Pre-flight (day 0, before first outreach)
 
 - [ ] Confirm reference mapping still works: `di verify zuraai.xyz` (or live E2E).
-- [ ] Confirm published tool version is installable: `npm install --global domaininstall` (or `npx`) on a clean check.
+- [ ] Choose and record the tested version in `RESULTS.md` (for example,
+      `0.0.3`), then confirm that exact artifact on a clean machine with both
+      `npm install --global domaininstall@<version>` and
+      `npx --yes domaininstall@<version> --version`.
 - [ ] Publisher guide is accurate for the current TXT format (`_dnstall`, `dnstall=pkg:npm/…`).
 - [ ] [CONTACT-TRACKER.md](./CONTACT-TRACKER.md) scoreboard reset; row 0 control present.
 - [ ] Prospect list drafted (≥20 **qualified** names per OUTREACH criteria) — methods only until you fill real rows.
@@ -149,7 +152,7 @@ Not “product is successful.” Done means:
 
 ---
 
-## Updating the roadmap (§2 and §7)
+## Updating the roadmap 2 and 7
 
 ### When gates **move** (start, pass, fail, or pivot)
 

@@ -152,8 +152,13 @@ A participant **comprehends** if and only if **C1, C2, and C3 are all correct**.
 \text{Comprehension rate} = \frac{\text{number who comprehend}}{\text{number who completed the instrument after valid exposure}}
 \]
 
-**Pass:** rate **≥ 80%**.  
-**Fail:** rate **&lt; 80%** with adequate sample.  
+**Actionable pass:** rate **≥ 80%** with at least 10 completers.
+
+**Fail:** rate **&lt; 80%** with at least 10 completers.
+
+**Provisional:** 5–9 completers; report the observed rate, but do not use it to
+authorize a gate-level continue decision.
+
 **Incomplete:** fewer than 5 completers (too thin to decide; keep recruiting).
 
 ### Worked examples
@@ -163,7 +168,9 @@ A participant **comprehends** if and only if **C1, C2, and C3 are all correct**.
 | 10 | 8 | 80% | Pass |
 | 10 | 7 | 70% | Fail |
 | 12 | 10 | 83% | Pass |
-| 5 | 4 | 80% | Pass (minimum honest n; note fragility) |
+| 9 | 8 | 89% | Provisional pass; recruit to 10 before a gate decision |
+| 5 | 5 | 100% | Provisional pass; not yet actionable |
+| 5 | 4 | 80% | Provisional pass; not yet actionable |
 
 ### Optional secondary score
 

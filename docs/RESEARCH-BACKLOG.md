@@ -122,7 +122,7 @@ Local pre-flight: `di verify zuraai.xyz` OK on published 0.0.3. Details:
 
 ---
 
-| **Status** | open — needs human outreach; seed list ready |#### RB-GATE1 — Publisher recruitment
+#### RB-GATE1 — Publisher recruitment
 
 | Field | Value |
 | --- | --- |
@@ -145,7 +145,7 @@ onboarding engineering (roadmap bet 1).
 
 ---
 
-| **Status** | open — needs human publishers |#### RB-GATE2 — DNS setup friction
+#### RB-GATE2 — DNS setup friction
 
 | Field | Value |
 | --- | --- |
@@ -170,13 +170,13 @@ fatal for a CLI thesis.
 
 ---
 
-| **Status** | partial — badge copy done; human study open |#### RB-GATE6 — Comprehension and DNSSEC badge
+#### RB-GATE6 — Comprehension and DNSSEC badge
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P0 |
 | **Severity** | High (reputational / safety messaging) |
-| **Status** | open |
+| **Status** | partial — badge copy done; human study open |
 | **Code/docs anchors** | [`docs/m4/COMPREHENSION.md`](m4/COMPREHENSION.md), [`src/cli.ts`](../src/cli.ts) (`dnssecBadge`, `printSummary`), [`src/doh.ts`](../src/doh.ts) (`authenticated` / AD bit), [`SECURITY.md`](../SECURITY.md), [`ROADMAP.md`](../ROADMAP.md) §7 gate 6 / R3 |
 
 **Research question.** After using the tool (or reading the preview), do ≥80% of
@@ -194,13 +194,13 @@ Feeds RB-DOH (what the badge should mean).
 
 ---
 
-| **Status** | **done** (desk) — research/FINDINGS-POSITIONING.md |#### RB-POSITION — DNS CLI vs provenance / agents pivot
+#### RB-POSITION — DNS CLI vs provenance / agents pivot
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P0 |
 | **Severity** | Critical (strategy) |
-| **Status** | open |
+| **Status** | **done** (desk) — research/FINDINGS-POSITIONING.md |
 | **Code/docs anchors** | [`ROADMAP.md`](../ROADMAP.md) §7 decision rule, §8 bets 2–3, [`docs/FEATURE-CANDIDATES.md`](FEATURE-CANDIDATES.md) (F03–F05, F33–F34), [`RESEARCH-demand-and-prior-art.md`](../RESEARCH-demand-and-prior-art.md), [`SECURITY.md`](../SECURITY.md) non-goals |
 
 **Research question.** If gates 1, 4, or 6 fail, is the highest-value next form
@@ -221,13 +221,13 @@ toward platform/interop wins.
 
 ### P1 — Security and code assumptions
 
-| **Status** | **done** — research/FINDINGS-DOH.md |#### RB-DOH — DoH providers, AD bit, multi-resolver
+#### RB-DOH — DoH providers, AD bit, multi-resolver
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P1 |
 | **Severity** | High |
-| **Status** | open |
+| **Status** | **done** — research/FINDINGS-DOH.md |
 | **Code/docs anchors** | [`src/doh.ts`](../src/doh.ts) (`DOH_PROVIDERS`, `do=1`, `authenticated: json.AD === true`, authoritative stop vs fallback), [`src/cli.ts`](../src/cli.ts) (`dnssecBadge`, resolver attempt printing), [`SECURITY.md`](../SECURITY.md), [`ROADMAP.md`](../ROADMAP.md) G3/G6, R4 |
 
 **Research question.** What does the AD bit from Cloudflare/Google DoH actually
@@ -245,13 +245,13 @@ Unblocks any “resolver used” UX and configurable-provider work.
 
 ---
 
-| **Status** | **done** (design) — research/FINDINGS-PIN-AND-TOCTOU.md |#### RB-PIN — Pin completeness (publisher / integrity)
+#### RB-PIN — Pin completeness (publisher / integrity)
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P1 |
 | **Severity** | Critical |
-| **Status** | open |
+| **Status** | **done** (design) — research/FINDINGS-PIN-AND-TOCTOU.md |
 | **Code/docs anchors** | [`src/pin.ts`](../src/pin.ts) (`Pin` fields: `namespace`, `package`, `registry`, `dnsVersion`), [`src/cli.ts`](../src/cli.ts) (`diffPin` / `savePin` on install), [`ROADMAP.md`](../ROADMAP.md) §6 layers 1–2 / G7, [`SECURITY-domain-ownership.md`](../SECURITY-domain-ownership.md) layer 1 |
 
 **Research question.** Which additional pin fields (npm publisher/owner, tarball
@@ -270,13 +270,13 @@ or in a branch; measure impact on pin-diff UX.
 
 ---
 
-| **Status** | **done** (design) — research/FINDINGS-PIN-AND-TOCTOU.md |#### RB-TOCTOU — Exact version + integrity install
+#### RB-TOCTOU — Exact version + integrity install
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P1 |
 | **Severity** | High |
-| **Status** | open |
+| **Status** | **done** (design) — research/FINDINGS-PIN-AND-TOCTOU.md |
 | **Code/docs anchors** | [`src/cli.ts`](../src/cli.ts) (resolve → plan → confirm → `runInstall`), [`src/install.ts`](../src/install.ts) (`buildInstallPlan`: `pkg@version` or bare name + `--registry`), [`ROADMAP.md`](../ROADMAP.md) §6 anti-TOCTOU (“resolve once”) |
 
 **Research question.** Roadmap claims resolution is fixed before confirmation and
@@ -297,13 +297,13 @@ the gap can be closed.
 
 ---
 
-| **Status** | **done** — research/FINDINGS-SCOPE-AND-PURL.md |#### RB-SCOPE — Scope registries
+#### RB-SCOPE — Scope registries
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P1 |
 | **Severity** | High |
-| **Status** | open |
+| **Status** | **done** — research/FINDINGS-SCOPE-AND-PURL.md |
 | **Code/docs anchors** | [`src/install.ts`](../src/install.ts) (`npmScopeOf`, `resolveEffectiveRegistry` refuse when `@scope:registry` ≠ default), [`src/cli.ts`](../src/cli.ts) (effective registry for scoped packages), [`ROADMAP.md`](../ROADMAP.md) G1 |
 
 **Research question.** Is permanent refuse the right long-term product for
@@ -320,13 +320,13 @@ adoption if private registries are common among recruits.
 
 ---
 
-| **Status** | partial — research/FINDINGS-WINDOWS-AND-SCRIPTS.md; clean VM gate open |#### RB-WIN-NPM — Windows npm launcher + E2E
+#### RB-WIN-NPM — Windows npm launcher + E2E
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P1 |
 | **Severity** | High |
-| **Status** | open |
+| **Status** | partial — research/FINDINGS-WINDOWS-AND-SCRIPTS.md; clean VM gate open |
 | **Code/docs anchors** | [`src/install.ts`](../src/install.ts) (`resolveNpmLauncher`, Windows `npm-cli.js` path candidates), [`scripts/e2e.ts`](../scripts/e2e.ts) (live E2E; CI is Ubuntu-oriented per roadmap), [`ROADMAP.md`](../ROADMAP.md) §4 outstanding Windows post-publish gate, R7, G11 |
 
 **Research question.** Does the published `0.0.3` artifact perform a real
@@ -344,13 +344,13 @@ closing the 0.0.3 exit gate and de-prioritizing launcher bugs.
 
 ---
 
-| **Status** | **done** (design) — research/FINDINGS-NONTTY.md |#### RB-NONTTY — CI / agent JSON mode design
+#### RB-NONTTY — CI / agent JSON mode design
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P1 |
 | **Severity** | High |
-| **Status** | open |
+| **Status** | **done** (design) — research/FINDINGS-NONTTY.md |
 | **Code/docs anchors** | [`src/ui.ts`](../src/ui.ts) (`confirm` returns false when `!stdin.isTTY`), [`src/cli.ts`](../src/cli.ts) (`--yes` ignored on pin change), [`src/args.ts`](../src/args.ts), [`ROADMAP.md`](../ROADMAP.md) G4, bets 2–3, [`docs/FEATURE-CANDIDATES.md`](FEATURE-CANDIDATES.md) F03/F05 |
 
 **Research question.** What is a safe non-interactive contract for agents and CI:
@@ -368,13 +368,13 @@ experiments once schema is stable on paper.
 
 ### P2 — Design de-risk
 
-| **Status** | **done** (defer pre-M4) — research/FINDINGS-RDAP-MAXAGE-FIRSTUSE.md |#### RB-RDAP — Registration liveness
+#### RB-RDAP — Registration liveness
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P2 |
 | **Severity** | Medium |
-| **Status** | open |
+| **Status** | **done** (defer pre-M4) — research/FINDINGS-RDAP-MAXAGE-FIRSTUSE.md |
 | **Code/docs anchors** | [`ROADMAP.md`](../ROADMAP.md) G9 / §6 layer 3, [`SECURITY-domain-ownership.md`](../SECURITY-domain-ownership.md) layer 3, no RDAP code in `src/` today |
 
 **Research question.** Can RDAP (or similar) detect re-registration/transfer
@@ -390,13 +390,13 @@ hardening after M4.
 
 ---
 
-| **Status** | **done** (defer pre-M4) — research/FINDINGS-RDAP-MAXAGE-FIRSTUSE.md |#### RB-MAXAGE — Pin maxAge / re-verification
+#### RB-MAXAGE — Pin maxAge / re-verification
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P2 |
 | **Severity** | Medium |
-| **Status** | open |
+| **Status** | **done** (defer pre-M4) — research/FINDINGS-RDAP-MAXAGE-FIRSTUSE.md |
 | **Code/docs anchors** | [`src/pin.ts`](../src/pin.ts) (`firstSeen` / `lastSeen`, no expiry), [`ROADMAP.md`](../ROADMAP.md) G8 / §6 layer 4, [`SECURITY-domain-ownership.md`](../SECURITY-domain-ownership.md) layer 4 |
 
 **Research question.** What maxAge (or re-confirm cadence) reduces hijack blast
@@ -410,13 +410,13 @@ confirm only or full re-fetch of registry identity fields (RB-PIN).
 
 ---
 
-| **Status** | **done** (defer pre-M4) — research/FINDINGS-RDAP-MAXAGE-FIRSTUSE.md |#### RB-TOFU-FIRST — First-use gap
+#### RB-TOFU-FIRST — First-use gap
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P2 |
 | **Severity** | Medium (by design for local TOFU) |
-| **Status** | open |
+| **Status** | **done** (defer pre-M4) — research/FINDINGS-RDAP-MAXAGE-FIRSTUSE.md |
 | **Code/docs anchors** | [`src/pin.ts`](../src/pin.ts), [`ROADMAP.md`](../ROADMAP.md) G10 / §6 layer 5, [`SECURITY-domain-ownership.md`](../SECURITY-domain-ownership.md) (sumdb / CT analogies) |
 
 **Research question.** Without a transparency log or shared infrastructure, what
@@ -453,13 +453,13 @@ passes and npm path is fully trusted.
 
 ---
 
-| **Status** | **done** — research/FINDINGS-SCOPE-AND-PURL.md |#### RB-PURL — purl boundaries
+#### RB-PURL — purl boundaries
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P2 |
 | **Severity** | Medium |
-| **Status** | open |
+| **Status** | **done** — research/FINDINGS-SCOPE-AND-PURL.md |
 | **Code/docs anchors** | [`src/record.ts`](../src/record.ts) (`pkg:` purl parse; qualifiers/subpath dropped; legacy `/npm/...` form), [`src/validate.ts`](../src/validate.ts) (namespace/package rules), [`ROADMAP.md`](../ROADMAP.md) bet 5 (other ecosystems) |
 
 **Research question.** Which purl features must be rejected vs ignored vs
@@ -515,13 +515,13 @@ unexpected resolution patterns (if detectable over DoH JSON).
 
 ---
 
-| **Status** | **done** (doc) — research/FINDINGS-WINDOWS-AND-SCRIPTS.md |#### RB-WIN-PIN — Windows trust-store guarantees
+#### RB-WIN-PIN — Windows trust-store guarantees
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P2 |
 | **Severity** | Medium |
-| **Status** | open |
+| **Status** | **done** (doc) — research/FINDINGS-WINDOWS-AND-SCRIPTS.md |
 | **Code/docs anchors** | [`src/pin.ts`](../src/pin.ts) (`IS_WINDOWS`, ACL/no-follow comments, atomic replace + lock), [`SECURITY.md`](../SECURITY.md) trust store notes, [`ROADMAP.md`](../ROADMAP.md) G11 |
 
 **Research question.** What residual Windows threats remain (reparse points,
@@ -535,13 +535,13 @@ rejection; decide accept residual vs document-only.
 
 ---
 
-| **Status** | **done** — research/FINDINGS-WINDOWS-AND-SCRIPTS.md |#### RB-SCRIPTS — Lifecycle scripts disabled
+#### RB-SCRIPTS — Lifecycle scripts disabled
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P2 |
 | **Severity** | Medium |
-| **Status** | open |
+| **Status** | **done** — research/FINDINGS-WINDOWS-AND-SCRIPTS.md |
 | **Code/docs anchors** | [`src/install.ts`](../src/install.ts) (`--ignore-scripts` in `buildInstallPlan`), [`README.md`](../README.md), [`SECURITY.md`](../SECURITY.md) |
 
 **Research question.** Which popular packages break under `--ignore-scripts`, and
@@ -575,13 +575,13 @@ allowlist for keys shown in preview vs silently ignored.
 
 ---
 
-| **Status** | partial — research/FINDINGS-WINDOWS-AND-SCRIPTS.md |#### RB-GLOBAL — Global install safety
+#### RB-GLOBAL — Global install safety
 
 | Field | Value |
 | --- | --- |
 | **Priority** | P2 |
 | **Severity** | Medium |
-| **Status** | open |
+| **Status** | partial — research/FINDINGS-WINDOWS-AND-SCRIPTS.md |
 | **Code/docs anchors** | [`src/args.ts`](../src/args.ts) (`-g` / `--global`), [`src/install.ts`](../src/install.ts) (`resolveNpmGlobalPrefix`, plan flags), [`src/cli.ts`](../src/cli.ts) (`installTargetDescription`) |
 
 **Research question.** Does showing npm’s global prefix sufficiently prevent
@@ -695,4 +695,4 @@ badge reword (`DNSSEC: AD` / `DNSSEC: no AD`).
 
 ---
 
-*Last updated: 2026-08-04. All research items above are **open** until evidence is recorded and status is changed.*
+*Last updated: 2026-08-04. Only items marked **open** or **partial** remain; completed design, desk, documentation, and implementation findings retain their recorded status above.*

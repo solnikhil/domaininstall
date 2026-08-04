@@ -187,14 +187,40 @@ async function queryProvider(
     };
   }
 
-  let body: string;
-  try {
-    body = await response.text();
-  } catch {
+  const reader = response.body?.getReader();
+  if (!reader) {
     return malformed(provider);
   }
 
-  if (body.length > MAX_DOH_BODY_BYTES) {
+  const chunks: Uint8Array[] = [];
+  let bodyBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bodyBytes += value.byteLength;
+      if (bodyBytes > MAX_DOH_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return malformed(provider);
+      }
+      chunks.push(value);
+    }
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    return malformed(provider);
+  }
+
+  const bytes = new Uint8Array(bodyBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  let body: string;
+  try {
+    body = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
     return malformed(provider);
   }
 

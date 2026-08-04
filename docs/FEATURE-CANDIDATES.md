@@ -855,7 +855,8 @@ Reuse Milestone 4 gates as the north star (panel measurement plan):
 **Weekly checklist (from synthesizers).** Funnel counts; gate thresholds; failure
 taxonomy (wrong NS, author≠DNS ops, propagation, motivation, DoH block, claim
 confusion); feature-freeze audit; pivot watch (two consecutive weeks missing
-publisher/comprehension → stop human-CLI bets, timebox F03+F05/F34). Never count
+publisher, Gate 4 correctness, or comprehension → stop human-CLI bets and
+timebox F03+F05/F34). Never count
 `zuraai.xyz` as external supply.
 
 **Decision rule.** If publisher, correctness, or comprehension gates fail: stop

@@ -6,7 +6,7 @@
 The pre-publication review covered every commit reachable from every local and
 remote-tracking ref.
 
-### Checks performed
+## Checks performed
 
 - `git fsck --full` for repository object integrity
 - review of the complete decorated commit graph

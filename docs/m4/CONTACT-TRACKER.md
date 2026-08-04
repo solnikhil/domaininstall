@@ -32,40 +32,43 @@ Update these counts from the table below. External rows only for gate totals (ex
 ## How to use a row
 
 1. Assign the next free **ID** (1, 2, …). Keep **0** as the control row.
-2. Confirm the prospect is **qualified** and not **excluded** before counting them in the scoreboard.
+2. Populate **Qualified**, **External**, **Excluded**, **Qualification evidence**,
+   and **Eligibility verified date** before counting the row. A Gate 1-eligible
+   row must be `Qualified=Y`, `External=Y`, `Excluded=N`, include auditable
+   evidence, and have a verification date. Notes are not eligibility evidence.
 3. Set **Response** to `pending` on contact; flip to `Y` or `N` when known.
 4. **Mapping live** only after `di verify <domain>` (or equivalent) succeeds on the public record.
 5. Put emails or private handles in **Notes** only if needed; prefer not to commit secrets. If this file is public, avoid personal emails — use “npm contact form” / “GitHub @user” instead.
 
-**Y/N columns:** use `Y`, `N`, or leave blank / `—` if not applicable yet. Response may also be `pending`.
+**Y/N columns:** use `Y`, `N`, or leave blank / `—` if not applicable yet. Response may also be `pending`. Row 0 remains a control and is always excluded from Gate 1 totals.
 
 ---
 
 ## Tracker
 
-| ID | Package | Domain | Homepage | Contact channel | Contacted date | Response (Y/N/pending) | Setup started | Setup completed unassisted (Y/N) | Setup time (minutes) | Maintainer DNS help needed (Y/N) | Mapping live (Y/N) | Record value | README placement (Y/N URL) | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | zuraai | zuraai.xyz | https://zuraai.xyz (or project homepage) | n/a (control) | — | — | Y | — | — | N | Y | `dnstall=pkg:npm/zuraai` | N | **CONTROL — does NOT count toward external gate 1.** Maintainer reference mapping `_dnstall.zuraai.xyz`. |
-| 1 | | | | | | pending | | | | | | | | |
-| 2 | | | | | | pending | | | | | | | | |
-| 3 | | | | | | pending | | | | | | | | |
-| 4 | | | | | | pending | | | | | | | | |
-| 5 | | | | | | pending | | | | | | | | |
-| 6 | | | | | | pending | | | | | | | | |
-| 7 | | | | | | pending | | | | | | | | |
-| 8 | | | | | | pending | | | | | | | | |
-| 9 | | | | | | pending | | | | | | | | |
-| 10 | | | | | | pending | | | | | | | | |
-| 11 | | | | | | pending | | | | | | | | |
-| 12 | | | | | | pending | | | | | | | | |
-| 13 | | | | | | pending | | | | | | | | |
-| 14 | | | | | | pending | | | | | | | | |
-| 15 | | | | | | pending | | | | | | | | |
-| 16 | | | | | | pending | | | | | | | | |
-| 17 | | | | | | pending | | | | | | | | |
-| 18 | | | | | | pending | | | | | | | | |
-| 19 | | | | | | pending | | | | | | | | |
-| 20 | | | | | | pending | | | | | | | | |
+| ID | Qualified (Y/N) | External (Y/N) | Excluded (Y/N) | Qualification evidence | Eligibility verified date | Package | Domain | Homepage | Contact channel | Contacted date | Response (Y/N/pending) | Setup started | Setup completed unassisted (Y/N) | Setup time (minutes) | Maintainer DNS help needed (Y/N) | Mapping live (Y/N) | Record value | README placement (Y/N URL) | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | N | N | Y | Maintainer-owned control mapping | 2026-08-04 | zuraai | zuraai.xyz | https://zuraai.xyz (or project homepage) | n/a (control) | — | — | Y | — | — | N | Y | `dnstall=pkg:npm/zuraai` | N | **CONTROL — does NOT count toward external gate 1.** Maintainer reference mapping `_dnstall.zuraai.xyz`. |
+| 1 | | | | | | | | | | | pending | | | | | | | | |
+| 2 | | | | | | | | | | | pending | | | | | | | | |
+| 3 | | | | | | | | | | | pending | | | | | | | | |
+| 4 | | | | | | | | | | | pending | | | | | | | | |
+| 5 | | | | | | | | | | | pending | | | | | | | | |
+| 6 | | | | | | | | | | | pending | | | | | | | | |
+| 7 | | | | | | | | | | | pending | | | | | | | | |
+| 8 | | | | | | | | | | | pending | | | | | | | | |
+| 9 | | | | | | | | | | | pending | | | | | | | | |
+| 10 | | | | | | | | | | | pending | | | | | | | | |
+| 11 | | | | | | | | | | | pending | | | | | | | | |
+| 12 | | | | | | | | | | | pending | | | | | | | | |
+| 13 | | | | | | | | | | | pending | | | | | | | | |
+| 14 | | | | | | | | | | | pending | | | | | | | | |
+| 15 | | | | | | | | | | | pending | | | | | | | | |
+| 16 | | | | | | | | | | | pending | | | | | | | | |
+| 17 | | | | | | | | | | | pending | | | | | | | | |
+| 18 | | | | | | | | | | | pending | | | | | | | | |
+| 19 | | | | | | | | | | | pending | | | | | | | | |
+| 20 | | | | | | | | | | | pending | | | | | | | | |
 
 Add rows 21+ if you contact more than 20; gate 1 still needs **≥20 qualified** contacts and **≥5 external** live mappings.
 

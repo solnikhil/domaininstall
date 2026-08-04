@@ -24,7 +24,9 @@ They solve different problems. For the full boundary, see
 - A domain you control (apex is fine; a subdomain you own also works)
 - An npm package you publish (or co-publish)
 - Access to that domain’s DNS at your registrar or DNS host
-- Node.js 22.14+ and npm on `PATH` (only needed for the verify step)
+- Node.js 22.14+ and npm on `PATH` are **not** needed to create or publish the
+  TXT record. They are required to install or run domaininstall for the later
+  `di verify` and install steps.
 
 You do **not** need a hosting account, a website on the domain, or any
 domaininstall server. This is one public TXT record.

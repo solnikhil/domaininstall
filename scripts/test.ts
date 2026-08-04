@@ -692,16 +692,24 @@ globalThis.fetch = async () => new Response(JSON.stringify({
     canonicalizeRegistryUrl,
     registriesEqual,
   } = await import("../dist/install.js");
-  const regAgain = assertEffectiveRegistryUnchanged("stripe", "https://registry.npmjs.org/");
+  const registryDir = mkdtempSync(join(tmpdir(), "dnstall-registry-recheck-"));
+  writeFileSync(join(registryDir, "package.json"), JSON.stringify({ name: "registry-fixture", version: "0.0.0" }));
+  writeFileSync(join(registryDir, ".npmrc"), "registry=https://registry.npmjs.org/\n");
+  const regAgain = assertEffectiveRegistryUnchanged("stripe", "https://registry.npmjs.org/", registryDir);
   check(
     "assertEffectiveRegistryUnchanged accepts stable public registry",
     regAgain.ok === true && regAgain.registry === "https://registry.npmjs.org/",
   );
-  const regMismatch = assertEffectiveRegistryUnchanged("stripe", "https://example-registry.invalid/");
+  const regMismatch = assertEffectiveRegistryUnchanged(
+    "stripe",
+    "https://example-registry.invalid/",
+    registryDir,
+  );
   check(
     "assertEffectiveRegistryUnchanged detects registry drift",
     regMismatch.ok === false,
   );
+  rmSync(registryDir, { recursive: true, force: true });
   check(
     "registry trailing-slash forms are equal",
     registriesEqual("https://registry.npmjs.org", "https://registry.npmjs.org/") === true,

@@ -47,6 +47,12 @@ Participant **may** use any of:
 
 They **must not** be told the correct package name in prose outside the mock/live verify surface. The verify output *is* the treatment.
 
+Only live-CLI trials may count toward Gate 4. Stimulus-card trials validate the
+materials and may be reported separately, but must never be pooled into the
+live correctness numerator or denominator. Gate 4 requires at least 30 scored
+LIVE trials in total, including at least 15 treatment and 15 matched control
+trials across at least five participants.
+
 ### Control (ordinary discovery)
 
 Participant may use **only**:
@@ -131,7 +137,7 @@ If you recruit more than 6, continue the pattern: alternate condition order; rot
 
 > You are invited to a short study about how people find the right npm package name when they know a website or product domain.
 >
-> You will complete several short scenarios. In some, you may use a small tool or card that shows a domain-to-package mapping; in others, only normal web/npm search. We record only your chosen package names, condition, task id, and optional free-text comments—not your pins, passwords, or private repos.
+> You will complete several short scenarios. In some, you may use a small tool or card that shows a domain-to-package mapping; in others, only normal web/npm search. We retain a pseudonymous participant id, task id, condition, chosen package answer, whether the task was abandoned, optional notes, and timestamp—not your pins, passwords, private repos, name, or contact details. Raw study data is available only to the maintainer and designated study operators, is retained for 90 days after the final M4 decision, and is then deleted; only aggregated anonymous results remain.
 >
 > There is no malware exercise and no requirement to install packages. You may stop at any time; incomplete tasks are dropped from analysis per our stop rules.
 >
@@ -580,8 +586,10 @@ timestamp:
 
 ### Primary endpoints
 
-1. **Treatment accuracy**  
-   \( A_T = \frac{\text{successes in treatment}}{\text{scored treatment trials}} \)  
+1. **Treatment accuracy**
+
+   \( A_T = \frac{\text{successes in LIVE treatment}}{\text{scored LIVE treatment trials}} \)
+
    Gate needs \( A_T \geq 0.90 \).
 
 2. **Improvement over control**  
@@ -590,24 +598,35 @@ timestamp:
 
 Both must pass.
 
+The primary Gate 4 calculation includes only the predeclared LIVE subset and
+requires the minimum live sample stated in §2. Compute simulated-card accuracy
+as a separate materials-validation result; it cannot rescue or fail Gate 4.
+
 ### Secondary (report, not gate)
 
 - Per-task accuracy (which scenarios are hard under control).
 - Order effects (treatment-first vs control-first).
-- LIVE vs SIM subset (expect treatment near-ceiling on both if materials are clear).
+- SIM stimulus-card accuracy as a separate materials-validation result.
 - Qualitative: where control users looked (npm search vs Google).
 
 ### Statistical honesty
 
-- Report **Wilson** or exact binomial interval for \( A_T \) if desired; with 18 trials, 90% is **≥17/18** successes.
-- Minimum pass examples at n=18 treatment: **17/18 ≈ 94%** or **18/18**. **16/18 ≈ 89%** fails the 90% bar.
-- Improvement: e.g. treatment 17/18 (94%), control 12/18 (67%) → Δ = 27 pp → pass if both thresholds met.
-- Do **not** claim significance without a planned test; if you run McNemar on paired tasks, treat as exploratory.
+- Because trials repeat within participants, label raw percentages as
+  **descriptive** unless uncertainty is participant-aware.
+- If reporting intervals, use a participant-cluster bootstrap or another
+  predeclared clustered/paired method. Do not use standalone Wilson or exact
+  binomial intervals that assume independent trials.
+- Improvement example: treatment 17/18 (94%), control 12/18 (67%) → Δ = 27 pp;
+  the descriptive thresholds pass, while uncertainty must still respect the
+  participant clusters.
+- Do **not** claim significance without a planned participant-aware test;
+  paired analyses such as McNemar must also account for repeated tasks within
+  each participant or be labeled exploratory.
 
 ### Aggregation rules
 
-- Primary analysis is **trial-level** (matches gate wording: “≥30 … tasks”).
-- Also report **participant-level** mean accuracy so one super-user cannot dominate narrative.
+- Report the predeclared LIVE trial-level gate metrics and the participant-level
+  distribution together so one participant cannot dominate the narrative.
 - Pre-specify: if a participant completes fewer than 4 of 6 tasks, drop that participant’s trials (see stop rules).
 
 ---

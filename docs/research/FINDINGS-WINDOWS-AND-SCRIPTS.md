@@ -148,7 +148,7 @@ POSIX-only hardening (`IS_WINDOWS` early-return or skipped):
 | No POSIX ownership check | `process.getuid` is unavailable; code skips UID checks on Windows |
 | No mode-bit exclusivity | Windows ACLs are the control plane; Node mode bits are not equivalent |
 | No durable directory fsync after rename | Explicit comment in `writeAtomically`; relies on Windows rename replace semantics |
-| **`O_NOFOLLOW` is a no-op** | On this machine `fs.constants.O_NOFOLLOW` is **`undefined`**. In JS, `O_RDONLY | undefined` coerces to `O_RDONLY`. File opens therefore do **not** get a Node-level no-follow guarantee for file reparse points / symlinks |
+| **`O_NOFOLLOW` is a no-op** | On this machine `fs.constants.O_NOFOLLOW` is **`undefined`**. In JS, `O_RDONLY \| undefined` coerces to `O_RDONLY`. File opens therefore do **not** get a Node-level no-follow guarantee for file reparse points / symlinks |
 | File-level reparse points | Directory symlinks are rejected; file-level symlink/reparse behavior is weaker than POSIX `O_NOFOLLOW` (see comments in `pin.ts` and `SECURITY.md`) |
 | Shared / non-exclusive profile ACLs | Store “relies on the per-user profile directory ACL.” Admin, SYSTEM, or broken inherited ACLs on `%USERPROFILE%` are outside the tool’s control |
 | Multi-user machines | Another local admin can generally read/write user profile data; domaininstall does not claim cross-user isolation on Windows |

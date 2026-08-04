@@ -107,31 +107,33 @@ Mirror of `ROADMAP.md` §7 decision rule, made operational.
 
 ---
 
-## DNSSEC badge wording — recommendation
+## DNSSEC badge wording — implemented decision
 
 ### Problem
 
-Today (`src/cli.ts`):
+Current shipped output (`src/cli.ts`):
 
-- Authenticated (DoH JSON `AD === true`): green **`DNSSEC ✓`**
-- Not authenticated: gray **`DNSSEC —`**
+- Authenticated (DoH JSON `AD === true`): green **`DNSSEC: AD`**
+- Not authenticated: gray **`DNSSEC: no AD`**
 
 Risks (aligned with `SECURITY.md`, comprehension C3 distractor, research backlog RB-GATE6):
 
-1. **`DNSSEC ✓` reads as “cryptographically verified / safe package.”** It is only the **resolver’s AD bit** over DoH — not client-side chain validation, not package integrity, not ownership continuity after transfer.
-2. **`DNSSEC —` looks like a failure.** Most domains are unsigned; “dash” can feel like a broken check.
+1. The AD label can still be over-read as “cryptographically verified / safe
+   package.” It is only the **resolver’s AD bit** over DoH—not client-side chain
+   validation, package integrity, or ownership continuity after transfer.
+2. `DNSSEC: no AD` is deliberately neutral because most domains are unsigned.
 3. The product does **not** pin DNSSEC state (Layer 1 partial). A green badge today does not re-check later.
 
-### Decision: **change the badge strings**
+### Decision: **badge strings changed and shipped**
 
 Prefer explicit, low-ceremony labels that match what the code actually knows.
 
 ### Recommended preview strings (exact)
 
-| Condition | Current | **Recommended (primary)** | Rationale |
-| --- | --- | --- | --- |
-| `authenticated === true` | `DNSSEC ✓` | `DNSSEC: AD` | Says “AD bit set,” not “package signed.” Short enough for the domain line. |
-| `authenticated === false` | `DNSSEC —` | `DNSSEC: no AD` | Neutral absence, not a red fail. |
+| Condition | Current shipped label | Rationale |
+| --- | --- | --- |
+| `authenticated === true` | `DNSSEC: AD` | Says “AD bit set,” not “package signed.” Short enough for the domain line. |
+| `authenticated === false` | `DNSSEC: no AD` | Neutral absence, not a red fail. |
 
 **Alternate if “AD” is too jargon-heavy for humans** (slightly longer; still honest):
 
