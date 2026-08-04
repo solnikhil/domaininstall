@@ -1,60 +1,139 @@
 # domaininstall roadmap
 
-This file is the operational roadmap and the live source of status. The
-generated checklist under `artifacts/` and `docs/RELEASE-CANDIDATE.md` are
-point-in-time snapshots from before the first publication; treat them as
-history.
+## About this document
 
-## Product promise
+This file is the operational roadmap and the single live source of project
+status. It records what is shipped, what is in flight, what is knowingly
+incomplete, and what would have to be true before the project grows further.
+
+**Status semantics.** A box is checked only when the work is complete *and*
+verifiable from outside the maintainer's machine — a merged commit, a green CI
+run, a published artifact, or a configured repository/registry setting. Local
+green test state is never sufficient on its own.
+
+**Related documents.**
+
+| Document | Role |
+| --- | --- |
+| `README.md` | User-facing behavior and current limits |
+| `SECURITY.md` | Supported threat model and reporting process |
+| `SECURITY-domain-ownership.md` | Design research for the ownership-change threat |
+| `docs/RELEASE.md` | Release, publication, and rollback procedure |
+| `CHANGELOG.md` | User-visible changes, from `0.0.3` onward |
+| `docs/RELEASE-CANDIDATE.md` | Point-in-time `0.0.1` snapshot — history only |
+| `docs/HISTORY-AUDIT.md` | Pre-publication Git history audit — history only |
+| `artifacts/` | Generated pre-publication checklist — history only |
+| `NOTES.md`, `RESEARCH*.md` | Original research log — history only |
+
+Historical documents are not updated as the project moves. When they disagree
+with this file, this file is correct.
+
+---
+
+## 1. Product promise and non-goals
+
+### Promise
 
 `domaininstall` lets a software project declare its official npm package from
-its own domain. It verifies continuity of that domain-to-package declaration and
-then installs through npm with dependency lifecycle scripts disabled.
+its own domain. It verifies continuity of that domain-to-package declaration,
+shows the user exactly what was resolved, and then installs through npm with
+dependency lifecycle scripts disabled.
 
-It is not a package malware scanner, source/build attestation system, registry,
-or replacement for npm provenance, lockfiles, allowlists, and dependency review.
+The security claim is deliberately narrow and is stated the same way everywhere:
 
-## Where the project actually stands
+> It verifies continuity of a domain-to-package declaration. It does not prove
+> that a package or package version is safe.
 
-Last reviewed 2026-07-27.
+### Non-goals
 
-- `domaininstall` is published on npm: `0.0.1` and `0.0.2`, both with SLSA
-  provenance attestations and registry signatures.
-- The GitHub repository is public and `main` is the default branch. `main` is
-  the commit the published `0.0.2` tarball was built from.
-- `feat/v0` is fully merged into `main` and is retired; do not branch from it.
-- The live example mapping works: `_dnstall.zuraai.xyz` resolves to
-  `dnstall=pkg:npm/zuraai`.
-- Real external adoption is zero. The only published mapping is the author's own
-  domain, so Milestone 4 below has not started.
+`domaininstall` is not, and is not on a path to become:
 
-## Shipped
+- a package malware scanner or code auditor;
+- a source or build attestation system;
+- a package registry, mirror, or proxy;
+- a replacement for npm provenance, lockfiles, allowlists, or dependency review.
 
-- **Milestone 0 — project truth.** No stray production dependency, complete
-  package metadata, README, MIT license, security policy, roadmap.
-- **Milestone 1 — P0 security gate.** Terminal sanitization of untrusted text;
-  distinct DNS outcomes for NODATA, NXDOMAIN, SERVFAIL, REFUSED, timeout,
+These are listed as non-goals rather than "later" so that scope pressure has a
+documented answer.
+
+---
+
+## 2. Where the project actually stands
+
+**Last verified 2026-08-04.** Each row below was checked against the registry,
+the repository, or a local run — not inferred from a previous review.
+
+| Dimension | State | Evidence |
+| --- | --- | --- |
+| npm releases | `0.0.1`, `0.0.2`, `0.0.3`; `latest` = `0.0.3` | Registry metadata; `0.0.3` published 2026-07-27 |
+| Supply-chain metadata | SLSA v1 provenance attestation and registry signature on `0.0.3` | `npm view domaininstall@0.0.3 dist` |
+| Published artifact | 12 files, 67 KB unpacked, zero production dependencies | Registry metadata; `npm run verify:package` |
+| Repository | Public; `main` is default and protected; `v0.0.3` tagged | Repository settings; `git tag -l` |
+| Retired branches | `feat/v0` is fully merged into `main` and retired — do not branch from it | Merge history |
+| Deterministic suite | 70 passed, 0 failed | `npm test` on Node 22.14 |
+| CI matrix | 6 jobs: `ubuntu`/`macos`/`windows-latest` × Node `22.14.0`/`24.x` | `.github/workflows/ci.yml` |
+| Live E2E | Ubuntu only; weekly cron, manual dispatch, and `v*` tags | `.github/workflows/e2e.yml` |
+| Reference mapping | `_dnstall.zuraai.xyz` → `dnstall=pkg:npm/zuraai` resolves | Live E2E |
+| External adoption | **Zero.** The only published mapping is the maintainer's own domain | Milestone 4 has not started |
+| Maintainership | Single maintainer, best-effort security response, latest version only | `SECURITY.md` |
+
+**The honest summary.** Release engineering and the security gate are ahead of
+where a `0.0.x` project normally is. Product validation has not begun. The
+binding constraint on this project is publisher supply, not code quality.
+
+---
+
+## 3. Milestone history
+
+### Milestone 0 — project truth *(shipped)*
+
+No stray production dependency, complete package metadata, README, MIT license,
+security policy, roadmap.
+
+### Milestone 1 — P0 security gate *(shipped, before first publication)*
+
+- Terminal sanitization of all untrusted text before display.
+- Distinct DNS outcomes for NODATA, NXDOMAIN, SERVFAIL, REFUSED, timeout,
   malformed response, and provider exhaustion, with fallback only where it is
-  safe; refusal of conflicting mappings; schema-validated, fail-closed,
-  POSIX owner-only, no-follow, atomic, lock-protected TOFU store with documented
-  recovery and explicit Windows ACL limitations; DNS version policy pinned
-  separately from a CLI override; strict
-  argument parsing before any DNS, install, or pin operation; deterministic
-  adversarial tests for each item.
-- **Milestone 2 — release engineering.** Deterministic tests separated from live
-  DNS/install tests; CI on Node 22 and 24 with clean install, build, tests,
-  production audit, and packed-artifact verification; live E2E on schedule,
-  manual dispatch, and release candidates; third-party actions pinned by commit
-  SHA with least privilege; Git history audited before going public; protected
-  first-publish workflow and a written rollback procedure.
-- **Milestone 3 — first publication.** `0.0.1` and `0.0.2` published from a
-  protected workflow with provenance, and verified from a clean environment.
+  safe. Authoritative answers — including negative ones — stop resolution, so a
+  resolver outage can never be mistaken for "this domain has no record".
+- Refusal of conflicting mappings rather than silent selection.
+- Schema-validated, fail-closed, POSIX owner-only, no-follow, atomic,
+  lock-protected TOFU store with documented recovery and explicitly stated
+  Windows ACL limitations.
+- DNS version policy pinned separately from a CLI override, so a one-off
+  `@version` cannot silently replace the domain's declared policy.
+- Strict argument parsing before any DNS, install, or pin operation.
+- Deterministic adversarial tests for each item above.
 
-## Release candidate (targets `0.0.3`)
+### Milestone 2 — release engineering *(shipped)*
 
-- [x] Support Windows: resolve npm's own CLI entry point and run it with the
-      current Node binary instead of spawning `npm.cmd`, so no npm argument is
-      ever parsed by `cmd.exe`.
+- Deterministic tests separated from live DNS/install tests.
+- CI with clean install, build, tests, production audit, and packed-artifact
+  verification.
+- Live E2E on schedule, manual dispatch, and release candidates.
+- Third-party actions pinned by full commit SHA with least privilege.
+- Git history audited before the repository was made public.
+- Protected first-publish workflow and a written rollback procedure.
+
+### Milestone 3 — first publication *(shipped)*
+
+`0.0.1` and `0.0.2` published from a protected workflow with provenance, and
+verified from a clean environment.
+
+---
+
+## 4. Release 0.0.3
+
+Published 2026-07-27. Scope was Windows correctness, registry honesty, and
+output hygiene. See `CHANGELOG.md` for the user-facing list.
+
+### Delivered
+
+- [x] Support Windows by resolving npm's own CLI entry point and running it with
+      the current Node binary instead of spawning `npm.cmd`, so no npm argument
+      is ever parsed by `cmd.exe`. A version range such as `^18` or `>=1 <2`
+      contains characters `cmd.exe` treats as escapes and redirections.
 - [x] Refuse an install when `@scope:registry` would divert the request away
       from the registry that is displayed and pinned, since npm gives
       scope-specific configuration precedence over `--registry`.
@@ -66,7 +145,7 @@ Last reviewed 2026-07-27.
       the resolved global prefix shown in the preview.
 - [x] Extend CI to macOS and Windows on both supported Node versions.
 
-## Next: release `0.0.3`
+### Release controls
 
 - [x] Land the changes above on `main` through a pull request with green CI on
       all six matrix jobs, including the two Windows jobs.
@@ -76,72 +155,190 @@ Last reviewed 2026-07-27.
 - [x] Protect the `npm-production` environment with staged human approval.
 - [x] Confirm npm OIDC trusted publishing targets `publish.yml` and the
       `npm-production` environment.
-- [ ] Tag `v0.0.3`, publish with provenance, and run the post-publication
-      verification in `docs/RELEASE.md` from a clean machine, including a
-      Windows machine.
 - [x] Add a `CHANGELOG.md` starting at `0.0.3`.
+- [x] Tag `v0.0.3` and publish with provenance.
 
-Exit gate: a fresh global install of `0.0.3` works on macOS, Linux, and Windows,
-and the published artifact is reproducible from its tag.
+### Outstanding exit gate
 
-## Known gaps, in priority order
+- [ ] Run the post-publication verification in `docs/RELEASE.md` from a clean
+      machine on **Windows**, and record the result here.
 
-1. Scope-specific registries are refused rather than supported. Support them by
-   resolving the per-scope registry and pinning it as the effective registry for
-   that package.
-2. `di trust` can only reset everything. Add `di trust list` and
-   `di trust forget <domain>`.
-3. DNS resolution depends on two DoH providers. Networks that block them have no
-   path forward; consider an opt-in system-resolver fallback that is clearly
-   labelled as unauthenticated in the preview.
-4. pnpm, Yarn, and Bun projects are refused. Each needs an equivalent
-   scripts-disabled install path and its own adversarial tests before it ships.
-5. Every lookup discloses the requested domain to a third-party resolver. This is
-   documented in the security policy but not surfaced in the CLI.
+This is the one incomplete item in the `0.0.3` line. It matters more than usual
+because `0.0.3` is the release that introduced the Windows npm launcher, and
+because live E2E runs on Ubuntu only — so no automated job exercises a real
+Windows install. Until this is done, Windows support is tested by unit tests and
+the CI build, but not by an end-to-end install from the published artifact.
 
-## Milestone 4 — two-week product validation
+**Exit gate.** A fresh global install of `0.0.3` works on macOS, Linux, and
+Windows, and the published artifact is reproducible from its tag.
 
-Run a quiet beta before any broad promotion. This is the gate that decides
-whether the CLI keeps growing.
+---
 
-- Recruit 20 qualified npm maintainers and obtain at least 5 external mappings.
-- Observe at least 4 of 5 publishers completing setup without the maintainer
-  editing DNS, with median setup time of 10 minutes or less.
-- Obtain at least 3 real README/install-documentation placements.
-- Run at least 30 counterbalanced package-discovery tasks; require at least 90%
-  correct selection and a 20-point improvement over ordinary discovery.
-- Reach at least 10 external users, 25 successful uses, and 5 repeat users.
-- Confirm at least 80% of participants understand that the tool verifies the
-  mapping, not package safety.
+## 5. Known gaps
 
-If the publisher, correctness, or comprehension gates fail, pivot toward an
-agent/CI policy tool or a verification API instead of expanding the CLI.
+Ordered by priority. Each gap states why it is acceptable today and what would
+close it, so that a future decision does not have to re-derive the reasoning.
 
-## Growth bets, ranked
+| ID | Gap | Severity | Why acceptable now | Closed when |
+| --- | --- | --- | --- | --- |
+| G1 | Scope-specific registries (`@scope:registry`) are refused, not supported | High | Refusing is honest; the alternative was showing one registry and fetching from another | The per-scope registry is resolved and pinned as the effective registry for that package |
+| G2 | `di trust` can only reset everything | High | Recovery exists and keeps a backup | `di trust list` and `di trust forget <domain>` ship, with tests for partial reset |
+| G3 | Resolution depends on two hard-coded DoH providers with no fallback | High | Fail-closed beats an unauthenticated silent downgrade | An opt-in system-resolver fallback exists and is labelled unauthenticated in the preview, or providers are configurable |
+| G4 | No non-interactive/machine-readable mode | High | Interactive confirmation is the core safety property for humans | `di resolve --json` ships with a stable schema and exit codes (see bet 2) |
+| G5 | pnpm, Yarn, and Bun projects are refused | Medium | Non-npm lockfiles are detected and refused rather than mishandled | Each has a scripts-disabled install path plus its own adversarial tests |
+| G6 | Every lookup discloses the requested domain to a third-party resolver | Medium | Documented in `SECURITY.md` | The CLI itself surfaces which resolver was used |
+| G7 | Pins record mapping, registry, and DNS version policy only | Medium | Defeats the headline repoint attack for returning users | Publisher identity and tarball integrity are pinned and diffed (see §6) |
+| G8 | Pins never expire | Medium | Continuity checks still run on every install | Pins carry a `maxAge` that forces full re-verification |
+| G9 | No registration-liveness (RDAP) check | Medium | Requires per-TLD handling and degrades under privacy proxies | A changed registration/creation date blocks and requires re-confirmation |
+| G10 | First-time users have nothing to compare against | Low (by design) | Inherent to TOFU and stated plainly in the README | Deferred to the transparency-log design; needs infrastructure |
+| G11 | Windows trust store has weaker guarantees than POSIX | Low | Documented; symlinked directories are still rejected and writes are still atomic and locked | Node exposes equivalent no-follow/ownership primitives on Windows |
 
-Pursue these only in this order, and only after the validation gate.
+---
 
-1. **Publisher onboarding.** `di setup` that generates the exact TXT record for
-   a package, plus copy-paste instructions for the major registrars and a
-   `di verify` badge a publisher can put in their README. Supply comes before
-   demand: without publishers, nothing else matters.
-2. **A verification API and machine-readable resolver.** `di resolve --json` and
-   a hosted lookup endpoint so CI, bots, and agents can check a domain's
-   declaration without installing. This is the highest-leverage surface if
-   agents, not humans, become the main consumers of package names.
-3. **Agent and CI policy mode.** A non-interactive allowlist mode:
-   "only install packages declared by these domains", which turns the tool from
-   a convenience into a control an organization can require.
+## 6. Security-design implementation status
+
+`SECURITY-domain-ownership.md` proposes a layered defense against domain
+expiry, transfer, and hostile repointing. That document is design research; this
+table is what actually ships today, so the two are not confused.
+
+| Layer | Design intent | Shipped? |
+| --- | --- | --- |
+| 0 — Authentic resolution | DoH transport; prefer DNSSEC, do not require it | **Yes.** DoH with `do=1`; the AD bit is surfaced as a `DNSSEC ✓ / —` badge in the preview |
+| 1 — TOFU local pin | Pin the full resolved identity | **Partial.** Namespace, package, registry, DNS version policy, first/last seen are pinned. Publisher, tarball integrity, provenance state, and DNSSEC state are not |
+| 2 — Re-verify and diff | Block loudly on any identity change | **Partial.** Diffs the four pinned fields and cannot be bypassed with `--yes`. Cannot detect publisher or integrity changes it does not pin |
+| 3 — RDAP liveness | Detect re-registration and transfer | **No.** See G9 |
+| 4 — Short trust window | Pins expire and force re-verification | **No.** See G8 |
+| 5 — Transparency log | Protect first-time users | **No.** Requires infrastructure; conflicts with the zero-infra stance. See G10 |
+| 6 — Provenance signal | Surface provenance and publisher match | **No.** See G7 |
+| Anti-TOCTOU | Resolve once, never re-resolve after confirmation | **Yes.** Resolution happens before the preview; the confirmed values are what get executed |
+
+The design document's inherited convention "never error on invalid records —
+ignore and move on" deliberately does **not** apply to ownership-change signals.
+Those fail loud and fail closed.
+
+---
+
+## 7. Milestone 4 — product validation
+
+**Not started.** This is the gate that decides whether the CLI keeps growing.
+Run a quiet two-week beta before any broad promotion.
+
+### Why this gate exists
+
+The tool's value is a network effect: it is worth using only if publishers
+declare mappings. With one mapping — the maintainer's own — every quality metric
+above measures a tool nobody yet needs. This milestone tests demand before more
+engineering is spent.
+
+### Gates
+
+| # | Gate | Threshold | Tests |
+| --- | --- | --- | --- |
+| 1 | Publisher recruitment | 20 qualified npm maintainers contacted; ≥5 external mappings live | Whether anyone will publish a record |
+| 2 | Unassisted setup | ≥4 of 5 publishers complete setup without the maintainer editing DNS; median setup time ≤10 minutes | Whether DNS onboarding friction is fatal |
+| 3 | Documentation placement | ≥3 real README/install-doc placements | Whether publishers will recommend it |
+| 4 | Discovery correctness | ≥30 counterbalanced package-discovery tasks; ≥90% correct selection and ≥20-point improvement over ordinary discovery | Whether it actually reduces wrong-package installs |
+| 5 | Usage | ≥10 external users, ≥25 successful uses, ≥5 repeat users | Whether it is used more than once |
+| 6 | Comprehension | ≥80% of participants understand that the tool verifies the mapping, not package safety | Whether the narrow claim survives contact with users |
+
+Gate 2 is the one most likely to fail. The original research flagged registrar
+UX, propagation delay, and debuggability as the objections that carry over from
+Go proposal #26160 — and unlike the others, they cannot be fixed in the CLI
+alone.
+
+### Decision rule
+
+If the publisher, correctness, or comprehension gates fail, **do not expand the
+CLI.** Pivot toward an agent/CI policy tool or a verification API, which need far
+fewer publishers to be useful because a single organization can adopt them
+unilaterally.
+
+---
+
+## 8. Growth bets, ranked
+
+Pursue in this order, and only after the validation gate.
+
+1. **Publisher onboarding.** `di setup` generates the exact TXT record for a
+   package, with copy-paste instructions for the major registrars, plus a
+   `di verify` badge for a publisher's README. Supply comes before demand:
+   without publishers, nothing else matters. *Done when a publisher can go from
+   zero to a working mapping without reading this repository.*
+2. **Verification API and machine-readable resolver.** `di resolve --json` plus a
+   hosted lookup endpoint so CI, bots, and agents can check a declaration
+   without installing. Highest-leverage surface if agents, not humans, become the
+   main consumers of package names. Also closes G4. *Done when a third party can
+   integrate against a documented, versioned schema.*
+3. **Agent and CI policy mode.** Non-interactive allowlist mode — "only install
+   packages declared by these domains" — which turns the tool from a convenience
+   into a control an organization can require. *Done when it runs unattended in
+   CI with deterministic exit codes and no TTY.*
 4. **The record specification as its own artifact.** A short spec page for the
-   `_dnstall` TXT format so other tools can implement it. This reframes the
-   project from one CLI to an interoperable convention.
+   `_dnstall` TXT format so other tools can implement it. Reframes the project
+   from one CLI into an interoperable convention. *Done when the spec is
+   versioned and separable from this implementation.*
 5. **More ecosystems.** PyPI and crates.io reuse the same purl payload; add them
    only once one ecosystem has proven publisher demand.
 
-## Deferred until the bets above pay off
+---
 
-- URI/SRV record support;
-- caching, federation, transparency logs, or domain-expiry infrastructure;
-- a package directory or rich record-metadata system;
-- a formal open-standard campaign; and
-- broad launch promotion.
+## 9. Deferred until the bets above pay off
+
+- URI/SRV record support. The author of Go proposal #26160 suggested URI records
+  (RFC 7553); registrar UI support and DoH JSON handling of URI records are both
+  weaker than TXT, and both worsen the onboarding friction that is already the
+  top risk.
+- Caching, federation, transparency logs, or domain-expiry infrastructure.
+- A package directory or rich record-metadata system.
+- A formal open-standard campaign.
+- Broad launch promotion.
+
+---
+
+## 10. Risk register
+
+| ID | Risk | Impact | Mitigation | Trigger to act |
+| --- | --- | --- | --- | --- |
+| R1 | No publisher adopts a mapping | Fatal to the CLI thesis | Milestone 4 gate 1; bet 1 exists to reduce setup cost | Gate 1 fails |
+| R2 | DNS onboarding friction blocks setup | Publishers start and abandon | `di verify` diagnostics; registrar-specific instructions | Median setup time exceeds 10 minutes |
+| R3 | Users over-read the security claim | Reputational; users skip real controls | Narrow claim repeated in README, `SECURITY.md`, and the CLI preview | Gate 6 falls below 80% |
+| R4 | Both DoH providers blocked or degraded | Tool unusable on that network | Fail closed with a distinct outcome rather than downgrading | Reported by any real user (G3) |
+| R5 | A mapped domain expires and is re-registered | Hijack of first-time installs | Layers 1–2 today; Layers 3–5 unbuilt | Any real external mapping exists (raises G9 priority) |
+| R6 | Single-maintainer bus factor | Unpatched vulnerability | Stated plainly in `SECURITY.md`; narrow scope; zero dependencies | External adoption reaches gate 5 thresholds |
+| R7 | Windows-only regression ships undetected | Broken installs on a supported platform | Six-job CI matrix | Live E2E remains Linux-only while §4's Windows gate is open |
+
+---
+
+## 11. Definition of done for 1.0 *(proposed, not committed)*
+
+Recorded so that "when is this 1.0?" has an answer that does not drift. Adopt or
+revise after Milestone 4.
+
+1. Milestone 4 passes, or the project has formally pivoted per the decision rule.
+2. G1–G4 are closed: scope registries supported, granular trust management,
+   a resolution path for networks that block DoH, and a machine-readable mode.
+3. The `_dnstall` record format is versioned and specified independently of this
+   implementation, so a 1.0 promise about the format means something.
+4. The post-publication verification runs on all three platforms for a release,
+   Windows included.
+5. Security-response expectations are either backed by more than one maintainer
+   or explicitly scoped down in `SECURITY.md`.
+
+---
+
+## 12. Maintaining this document
+
+- Update §2 whenever a release is published, a repository/registry control
+  changes, or adoption changes. Re-verify each row; do not carry rows forward.
+- Move completed work into §3 with the release it shipped in.
+- When a gap closes, remove it from §5 and note it in `CHANGELOG.md` if it is
+  user-visible. Do not silently delete a gap.
+- Reference commands used to verify §2:
+
+  ```bash
+  npm view domaininstall versions dist-tags time --json
+  npm view domaininstall@<version> dist --json     # provenance and signatures
+  npm ci && npm test && npm run verify:package
+  npm run test:e2e                                 # live DNS and real install
+  git tag -l
+  ```
