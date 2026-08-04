@@ -71,7 +71,7 @@ repository, or a local run — not inferred from an older review.
 | Published artifact | 12 files, 67 KB unpacked, zero production dependencies | Registry metadata; `npm run verify:package` |
 | Repository | Public; `main` is default and protected; `v0.0.3` tagged | Repository settings; `git tag -l` |
 | Retired branches | `feat/v0` is fully merged into `main` and retired — don’t branch from it | Merge history |
-| Deterministic suite | 82 passed (+ exhaustive suite), 0 failed | `npm test` on Node 22.14 |
+| Deterministic suite | 103 passed (+ exhaustive suite), 0 failed | `npm test` on Node 22.14 |
 | CI matrix | 6 jobs: `ubuntu` / `macos` / `windows-latest` × Node `22.14.0` / `24.x` | `.github/workflows/ci.yml` |
 | Live E2E | Linux, macOS, and Windows on Node 22.14; weekly cron, manual dispatch, and `v*` tags. Covers a project-scoped install, a global install into an isolated prefix, pin continuity, and `di verify` | `.github/workflows/e2e.yml`, `scripts/e2e.ts` |
 | Reference mapping | `_dnstall.zuraai.xyz` → `dnstall=pkg:npm/zuraai` resolves | Live E2E |
@@ -287,6 +287,10 @@ UX, propagation delay, and debuggability as the objections that carry over from
 Go proposal #26160 — and unlike the others, they can’t be fixed in the CLI
 alone.
 
+Gate 2 is only meaningful now that `di setup` exists: before it, the gate
+measured hand-authoring a TXT record from prose, not the product a publisher
+would actually be given. See the recorded ordering exception in §8.
+
 ### Decision rule
 
 If the publisher, correctness, or comprehension gates fail, **do not expand the
@@ -298,13 +302,34 @@ on its own.
 
 ## 8. Growth bets, ranked
 
-Pursue in this order — and only after the validation gate.
+Pursue in this order, and only after the validation gate — with one recorded
+exception, below.
 
 1. **Publisher onboarding.** `di setup` generates the exact TXT record for a
    package, with copy-paste instructions for the major registrars, plus a
    `di verify` badge for a publisher’s README. Supply comes before demand:
    without publishers, nothing else matters. *Done when a publisher can go from
    zero to a working mapping without reading this repository.*
+   - **Partially delivered ahead of the gate.** `di setup <domain>[/sub]
+     <package>[@range]` ships the record-generation half: relative name,
+     fully-qualified name, zone-file line, version-policy prompt, and the two
+     failure modes publishers actually hit. Still open: per-registrar
+     instructions and the `di verify` badge.
+
+### Recorded exception to the ordering rule
+
+Shipping any part of bet 1 before Milestone 4 contradicts the rule above, so the
+reasoning is recorded rather than left implicit.
+
+Gate 2 measures whether publishers can complete setup **without the maintainer
+editing DNS**. With no record generator, that gate measured hand-authoring a
+`_dnstall` TXT record from README prose — which R2 already predicts fails. A
+failure there would have triggered the pivot decision rule, when what actually
+failed was the absence of onboarding tooling rather than the thesis.
+
+The exception is therefore bounded: build the minimum that makes gate 2 measure
+the real product, and nothing further. Per-registrar instructions, the badge, and
+every other bet stay behind the gate.
 2. **Verification API and machine-readable resolver.** `di resolve --json` plus a
    hosted lookup endpoint so CI, bots, and agents can check a declaration
    without installing. Highest-leverage surface if agents, not humans, become the
@@ -341,7 +366,7 @@ Pursue in this order — and only after the validation gate.
 | ID | Risk | Impact | Mitigation | Trigger to act |
 | --- | --- | --- | --- | --- |
 | R1 | No publisher adopts a mapping | Fatal to the CLI thesis | Milestone 4 gate 1; bet 1 exists to reduce setup cost | Gate 1 fails |
-| R2 | DNS onboarding friction blocks setup | Publishers start and abandon | `di verify` diagnostics; registrar-specific instructions | Median setup time exceeds 10 minutes |
+| R2 | DNS onboarding friction blocks setup | Publishers start and abandon | `di setup` generates the record and names the two common failure modes; `di verify` diagnoses the result. Per-registrar instructions still missing | Median setup time exceeds 10 minutes |
 | R3 | Users over-read the security claim | Reputational; users skip real controls | Narrow claim repeated in README, `SECURITY.md`, and the CLI preview | Gate 6 falls below 80% |
 | R4 | Both DoH providers blocked or degraded | Tool unusable on that network | Fail closed with a distinct outcome rather than downgrading | Reported by any real user (G3) |
 | R5 | A mapped domain expires and is re-registered | Hijack of first-time installs | Layers 1–2 today; Layers 3–5 unbuilt | Any real external mapping exists (raises G9 priority) |
