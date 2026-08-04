@@ -319,6 +319,43 @@ export function getPin(domain: string): Pin | undefined {
   return load()[domain];
 }
 
+export interface PinEntry extends Pin {
+  domain: string;
+}
+
+/**
+ * Every remembered mapping, sorted by domain for deterministic output.
+ *
+ * Read-only: a corrupt or unsafe store still fails closed here, because
+ * reporting "no pins" for an unreadable store would misrepresent trust state as
+ * absent rather than broken.
+ */
+export function listPins(): PinEntry[] {
+  const store = load();
+  return Object.keys(store)
+    .sort()
+    .map((domain) => ({ domain, ...store[domain]! }));
+}
+
+/**
+ * Remove a single domain's pin, leaving every other mapping intact.
+ *
+ * Returns the removed pin, or undefined when the domain disappeared or its
+ * security-relevant identity changed after the caller displayed it. The
+ * compare-and-delete happens under the same lock as savePin, so confirmation
+ * can never delete a different mapping written concurrently.
+ */
+export function forgetPin(domain: string, expectedExisting: Pin): Pin | undefined {
+  return withLock(() => {
+    const store = load();
+    const existing = store[domain];
+    if (!existing || !pinIdentityEqual(existing, expectedExisting)) return undefined;
+    delete store[domain];
+    writeAtomically(store);
+    return existing;
+  });
+}
+
 export function diffPin(
   domain: string,
   next: { namespace: string; package: string; registry: string; dnsVersion: string | null },

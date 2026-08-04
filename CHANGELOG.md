@@ -16,9 +16,18 @@ when that happens.
   fully-qualified name, and a zone-file line. The command runs entirely offline,
   so the record can be generated before it exists, and every generated record is
   checked back through the record parser before being shown.
+- `di trust list` shows every remembered domain mapping with its package,
+  version policy, and the date it was last seen.
+- `di trust forget <domain>` removes a single remembered mapping and leaves every
+  other mapping intact. It shows the mapping it is about to drop and confirms
+  first, unless `--force` is supplied.
 - Live end-to-end coverage on macOS and Windows in addition to Linux, now
   including a global install into an isolated npm prefix and a trust-pin
   continuity check across two installs.
+
+### Changed
+
+- `--force` now applies to both `trust forget` and `trust reset`.
 
 ## [0.0.3] - 2026-07-27
 

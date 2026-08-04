@@ -71,7 +71,7 @@ repository, or a local run — not inferred from an older review.
 | Published artifact | 12 files, 67 KB unpacked, zero production dependencies | Registry metadata; `npm run verify:package` |
 | Repository | Public; `main` is default and protected; `v0.0.3` tagged | Repository settings; `git tag -l` |
 | Retired branches | `feat/v0` is fully merged into `main` and retired — don’t branch from it | Merge history |
-| Deterministic suite | 103 passed (+ exhaustive suite), 0 failed | `npm test` on Node 22.14 |
+| Deterministic suite | 124 passed (+ exhaustive suite), 0 failed | `npm test` on Node 22.14 |
 | CI matrix | 6 jobs: `ubuntu` / `macos` / `windows-latest` × Node `22.14.0` / `24.x` | `.github/workflows/ci.yml` |
 | Live E2E | Linux, macOS, and Windows on Node 22.14; weekly cron, manual dispatch, and `v*` tags. Covers a project-scoped install, a global install into an isolated prefix, pin continuity, and `di verify` | `.github/workflows/e2e.yml`, `scripts/e2e.ts` |
 | Reference mapping | `_dnstall.zuraai.xyz` → `dnstall=pkg:npm/zuraai` resolves | Live E2E |
@@ -195,10 +195,14 @@ Windows, and the published artifact is reproducible from its tag.
 Ordered by priority. Each gap says why it’s acceptable today and what would
 close it — so a future decision doesn’t have to re-derive the reasoning.
 
+Gap IDs are stable and are not reused when a gap closes.
+
+**Closed:** G2 — `di trust list` and `di trust forget <domain>` ship, so recovery
+from one bad pin no longer requires discarding every remembered mapping.
+
 | ID | Gap | Severity | Why acceptable now | Closed when |
 | --- | --- | --- | --- | --- |
 | G1 | Scope-specific registries (`@scope:registry`) are refused, not supported | High | Refusing is honest; the alternative was showing one registry and fetching from another | The per-scope registry is resolved and pinned as the effective registry for that package |
-| G2 | `di trust` can only reset everything | High | Recovery exists and keeps a backup | `di trust list` and `di trust forget <domain>` ship, with tests for partial reset |
 | G3 | Resolution depends on two hard-coded DoH providers with no fallback | High | Fail-closed beats an unauthenticated silent downgrade | An opt-in system-resolver fallback exists and is labelled unauthenticated in the preview, or providers are configurable |
 | G4 | No non-interactive / machine-readable mode | High | Interactive confirmation is the core safety property for humans | `di resolve --json` ships with a stable schema and exit codes (see bet 2) |
 | G5 | pnpm, Yarn, and Bun projects are refused | Medium | Non-npm lockfiles are detected and refused rather than mishandled | Each has a scripts-disabled install path plus its own adversarial tests |
@@ -381,8 +385,9 @@ Recorded so “when is this 1.0?” has an answer that doesn’t drift. Adopt or
 after Milestone 4.
 
 1. Milestone 4 passes, or the project has formally pivoted per the decision rule.
-2. G1–G4 are closed: scope registries supported, granular trust management, a
-   resolution path for networks that block DoH, and a machine-readable mode.
+2. G1, G3, and G4 are closed: scope registries supported, a resolution path for
+   networks that block DoH, and a machine-readable mode. (G2, granular trust
+   management, is already closed.)
 3. The `_dnstall` record format is versioned and specified independently of this
    implementation, so a 1.0 promise about the format means something.
 4. The post-publication verification runs on all three platforms for a release,

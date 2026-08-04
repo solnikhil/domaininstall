@@ -19,12 +19,14 @@ import {
   DNS_PREFIX,
   type DnstallRecord,
 } from "./record.js";
-import { parseTarget, validatePackageName, validateVersionRange } from "./validate.js";
+import { parseTarget, validateDomain, validatePackageName, validateVersionRange } from "./validate.js";
 import { buildSetupPlan } from "./setup.js";
 import {
   diffPin,
+  forgetPin,
   savePin,
   getPin,
+  listPins,
   resetPinStore,
   PIN_FILE,
   type PinChange,
@@ -508,6 +510,110 @@ function cmdSetup(target: string, packageSpec: string): number {
   return 0;
 }
 
+/** An index of remembered mappings; `di verify` shows the full pinned record. */
+function cmdTrustList(): number {
+  const pins = listPins();
+
+  if (pins.length === 0) {
+    info("");
+    info("  No remembered mappings yet.");
+    info(c.dim("  A mapping is recorded the first time an install from a domain succeeds."));
+    info(c.dim(`  pin file: ${PIN_FILE}`));
+    info("");
+    return 0;
+  }
+
+  const rows = pins.map((pin) => ({
+    domain: sanitizeTerminalText(pin.domain),
+    package: sanitizeTerminalText(pin.package),
+    policy: pin.dnsVersion === null ? "latest" : sanitizeTerminalText(pin.dnsVersion),
+    lastSeen: pin.lastSeen.slice(0, 10),
+  }));
+  // Pad to the widest value so the output stays scannable, but never let one
+  // long domain or scoped name push the later columns off screen.
+  const width = (values: string[], cap: number): number =>
+    Math.min(cap, Math.max(...values.map((value) => value.length)));
+  const domainWidth = width([...rows.map((row) => row.domain), "domain"], 40);
+  const packageWidth = width([...rows.map((row) => row.package), "package"], 32);
+  const policyWidth = width([...rows.map((row) => row.policy), "policy"], 12);
+  const clip = (value: string, max: number): string =>
+    value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
+
+  info("");
+  info(`  ${pins.length} remembered mapping${pins.length === 1 ? "" : "s"}`);
+  info("");
+  info(
+    "  " +
+      c.dim(
+        `${"domain".padEnd(domainWidth)}  ${"package".padEnd(packageWidth)}  ` +
+          `${"policy".padEnd(policyWidth)}  last seen`,
+      ),
+  );
+  for (const row of rows) {
+    const domain = clip(row.domain, domainWidth);
+    const packageName = clip(row.package, packageWidth);
+    const policy = clip(row.policy, policyWidth);
+    info(
+      `  ${domain.padEnd(domainWidth)}  ${packageName.padEnd(packageWidth)}  ` +
+        `${policy.padEnd(policyWidth)}  ${row.lastSeen}`,
+    );
+  }
+  info("");
+  info(c.dim("  di verify <domain>        show the full pinned record, including its registry"));
+  info(c.dim("  di trust forget <domain>  remove one mapping"));
+  info(c.dim(`  pin file: ${PIN_FILE}`));
+  info("");
+  return 0;
+}
+
+/**
+ * Remove one mapping. Narrower than a full reset, but still a loss of the
+ * hijack defense for that domain, so it confirms and says what it is dropping.
+ */
+async function cmdTrustForget(domainInput: string, force: boolean): Promise<number> {
+  const domainCheck = validateDomain(domainInput);
+  if (!domainCheck.ok) {
+    error(domainCheck.error);
+    return 1;
+  }
+  const domain = domainCheck.value;
+
+  const existing = getPin(domain);
+  if (!existing) {
+    error(`No remembered mapping for ${domain}.`);
+    info(`\n  Run ${c.bold("di trust list")} to see every remembered mapping.\n`);
+    return 1;
+  }
+
+  info("");
+  info(`  ${c.dim("domain")}     ${c.bold(domain)}`);
+  info(`  ${c.dim("package")}    ${c.bold(sanitizeTerminalText(existing.package))}`);
+  info(`  ${c.dim("policy")}     ${existing.dnsVersion === null ? c.dim("latest") : sanitizeTerminalText(existing.dnsVersion)}`);
+  info(`  ${c.dim("registry")}   ${sanitizeTerminalText(existing.registry)}`);
+  info(`  ${c.dim("first seen")} ${existing.firstSeen.slice(0, 10)}`);
+  info("");
+
+  if (!force) {
+    warn(`Forgetting ${domain} means the next install from it is treated as a first use,`);
+    detail(ce.dim("    with no earlier mapping to compare against."));
+    detail("");
+    const proceed = await confirm(`Forget the remembered mapping for ${c.bold(domain)}?`);
+    if (!proceed) {
+      info(c.dim("Aborted."));
+      return 130;
+    }
+  }
+
+  const removed = forgetPin(domain, existing);
+  if (!removed) {
+    error(`The remembered mapping for ${domain} changed while you were confirming; nothing was removed.`);
+    info(`\n  Run ${c.bold("di trust list")} and review the current mapping before retrying.\n`);
+    return 1;
+  }
+  success(`Forgot ${domain}. Other remembered mappings are unchanged.`);
+  return 0;
+}
+
 async function cmdTrustReset(force: boolean): Promise<number> {
   warn("This removes every remembered domain mapping and resets trust-on-first-use state.");
   if (!force) {
@@ -561,6 +667,8 @@ ${c.dim("USAGE")}
   di <domain>[/sub][@version] [-g]           resolve, confirm, and install
   di verify <domain>                         diagnose the DNS record (no install)
   di setup <domain>[/sub] <package>[@range]  print the TXT record to publish
+  di trust list                              show every remembered mapping
+  di trust forget <domain> [--force]         remove one remembered mapping
   di trust reset --all [--force]             back up and reset all TOFU pins
   domaininstall <domain>                     descriptive alias
   dnstall <domain>                           legacy short alias
@@ -573,13 +681,15 @@ ${c.dim("EXAMPLES")}
   di verify zuraai.xyz               check the record without installing
   di setup example.com my-package    generate the record a publisher must add
   di setup example.com/react ui@^2   generate a sub-package record with a policy
+  di trust list                      review which mappings are remembered
+  di trust forget stripe.com         drop one mapping, keeping the rest
 
 ${c.dim("OPTIONS")}
   -y, --yes        skip confirmation when the pin is unchanged (not a review of first use)
   -g, --global     install globally (npm install --global)
   -h, --help       show this help
   -V, --version    show version
-  --force          skip the trust-reset prompt (only with trust reset --all)
+  --force          skip the confirmation prompt (only with trust forget/reset)
 
 ${c.dim("PUBLISHING")}
   ${c.bold("di setup")} prints the exact record to add at your DNS provider, then
@@ -622,6 +732,10 @@ async function main(): Promise<number> {
       return cmdVerify(parsed.command.target);
     case "setup":
       return cmdSetup(parsed.command.target, parsed.command.packageSpec);
+    case "trust_list":
+      return cmdTrustList();
+    case "trust_forget":
+      return cmdTrustForget(parsed.command.domain, parsed.command.force);
     case "trust_reset":
       return cmdTrustReset(parsed.command.force);
   }
