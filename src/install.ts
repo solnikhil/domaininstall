@@ -196,18 +196,51 @@ function isUnsetConfigValue(value: string): boolean {
   return value.length === 0 || value === "undefined" || value === "null";
 }
 
-function validateRegistryUrl(raw: string): RegistryResult {
+/**
+ * Normalize an HTTPS registry URL for pin and equality checks.
+ * Lowercases the host and ensures the path ends with `/` so trailing-slash
+ * drift from `npm config get` does not false-fail continuity checks.
+ */
+export function canonicalizeRegistryUrl(raw: string): string | null {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+  if (!url.hostname || url.username || url.password || url.search || url.hash) return null;
+  url.hostname = url.hostname.toLowerCase();
+  if (!url.pathname.endsWith("/")) {
+    url.pathname = `${url.pathname}/`;
+  }
+  return url.href;
+}
+
+function validateRegistryUrl(raw: string): RegistryResult {
+  const registry = canonicalizeRegistryUrl(raw);
+  if (!registry) {
+    // Distinguish common failures for clearer errors.
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return { ok: false, error: "npm returned a malformed registry URL." };
+    }
+    if (url.protocol !== "https:") return { ok: false, error: "The npm registry must use HTTPS." };
+    if (url.username || url.password || url.search || url.hash) {
+      return { ok: false, error: "The npm registry URL must not contain credentials, a query, or a fragment." };
+    }
     return { ok: false, error: "npm returned a malformed registry URL." };
   }
-  if (url.protocol !== "https:") return { ok: false, error: "The npm registry must use HTTPS." };
-  if (url.username || url.password || url.search || url.hash) {
-    return { ok: false, error: "The npm registry URL must not contain credentials, a query, or a fragment." };
-  }
-  return { ok: true, registry: url.href };
+  return { ok: true, registry };
+}
+
+/** True when two registry URLs refer to the same host/path after canonicalization. */
+export function registriesEqual(a: string, b: string): boolean {
+  const left = canonicalizeRegistryUrl(a);
+  const right = canonicalizeRegistryUrl(b);
+  return left !== null && right !== null && left === right;
 }
 
 /** Ask npm for its default effective registry, then validate it. */
@@ -259,7 +292,7 @@ export function resolveEffectiveRegistry(
   if (!scopedRegistry.ok) {
     return { ok: false, error: `npm routes ${scope} to an unsupported registry: ${scopedRegistry.error}` };
   }
-  if (scopedRegistry.registry !== base.registry) {
+  if (!registriesEqual(scopedRegistry.registry, base.registry)) {
     return {
       ok: false,
       error:
@@ -268,6 +301,7 @@ export function resolveEffectiveRegistry(
         `install is refused rather than shown against the wrong registry. Install ${pkg} with npm directly.`,
     };
   }
+  // Prefer the already-canonical default so pins stay stable.
   return base;
 }
 
@@ -315,7 +349,7 @@ export function assertEffectiveRegistryUnchanged(
   // and scoped registries are re-read from npm.
   const resolved = resolveEffectiveRegistry(pkg, cwd);
   if (!resolved.ok) return resolved;
-  if (resolved.registry !== expectedRegistry) {
+  if (!registriesEqual(resolved.registry, expectedRegistry)) {
     return {
       ok: false,
       error:

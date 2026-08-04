@@ -404,13 +404,15 @@ async function cmdVerify(target: string): Promise<number> {
 
   // Effective registry for pin continuity comparison (and scoped-package honesty).
   let effectiveRegistry: string | undefined;
+  let registryLookupFailed = false;
   const effective = resolveEffectiveRegistry(supportedRecord.package);
   if (effective.ok) {
     effectiveRegistry = effective.registry;
     if (npmScopeOf(supportedRecord.package)) {
       info(c.dim(`  registry for this package: ${effective.registry}`));
     }
-  } else if (npmScopeOf(supportedRecord.package)) {
+  } else {
+    registryLookupFailed = true;
     info("");
     warn(effective.error);
   }
@@ -439,6 +441,9 @@ async function cmdVerify(target: string): Promise<number> {
       detail(ce.dim("    Record syntax is valid, but continuity check failed."));
       detail(ce.dim("    Install would require interactive confirmation ( --yes is ignored )."));
       return 1;
+    }
+    if (registryLookupFailed) {
+      warn("Could not re-read npm registry config; pin registry field was not re-checked.");
     }
     info(c.dim("  pin: matches live mapping"));
   } else {

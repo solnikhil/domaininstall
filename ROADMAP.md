@@ -71,7 +71,7 @@ repository, or a local run — not inferred from an older review.
 | Published artifact | 12 files, 67 KB unpacked, zero production dependencies | Registry metadata; `npm run verify:package` |
 | Repository | Public; `main` is default and protected; `v0.0.3` tagged | Repository settings; `git tag -l` |
 | Retired branches | `feat/v0` is fully merged into `main` and retired — don’t branch from it | Merge history |
-| Deterministic suite | 76 passed, 0 failed | `npm test` on Node 22.14 |
+| Deterministic suite | 82 passed (+ exhaustive suite), 0 failed | `npm test` on Node 22.14 |
 | CI matrix | 6 jobs: `ubuntu` / `macos` / `windows-latest` × Node `22.14.0` / `24.x` | `.github/workflows/ci.yml` |
 | Live E2E | Ubuntu only; weekly cron, manual dispatch, and `v*` tags | `.github/workflows/e2e.yml` |
 | Reference mapping | `_dnstall.zuraai.xyz` → `dnstall=pkg:npm/zuraai` resolves | Live E2E |
@@ -214,7 +214,7 @@ this table is what actually ships today — so the two don’t get mixed up.
 
 | Layer | Design intent | Shipped? |
 | --- | --- | --- |
-| 0 — Authentic resolution | DoH transport; prefer DNSSEC, don’t require it | **Yes.** DoH with `do=1`; AD bit shows as `DNSSEC (resolver AD) ✓ / —` (resolver-reported, not client-validated) |
+| 0 — Authentic resolution | DoH transport; prefer DNSSEC, don’t require it | **Yes.** DoH with `do=1`; AD bit shows as `DNSSEC: AD` / `DNSSEC: no AD` (resolver-reported, not client-validated or package-safe) |
 | 1 — TOFU local pin | Pin the full resolved identity | **Partial.** Namespace, package, registry, DNS version policy, first/last seen are pinned. Publisher, tarball integrity, provenance state, and DNSSEC state are not |
 | 2 — Re-verify and diff | Block loudly on any identity change | **Partial.** Diffs the four pinned fields and can’t be bypassed with `--yes`. Can’t detect publisher or integrity changes it doesn’t pin |
 | 3 — RDAP liveness | Detect re-registration and transfer | **No.** See G9 |

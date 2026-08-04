@@ -123,6 +123,11 @@ function normalizeStoredRegistry(value: unknown): string | null {
   if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || url.hash) {
     return null;
   }
+  // Match install.ts canonicalizeRegistryUrl: stable pin equality across npm output shapes.
+  url.hostname = url.hostname.toLowerCase();
+  if (!url.pathname.endsWith("/")) {
+    url.pathname = `${url.pathname}/`;
+  }
   return url.href;
 }
 
@@ -327,8 +332,18 @@ export function diffPin(
   if (existing.package !== next.package) {
     changes.push({ field: "package", was: existing.package, now: next.package });
   }
-  if (existing.registry !== next.registry) {
-    changes.push({ field: "registry", was: existing.registry, now: next.registry });
+  const existingRegistry = normalizeStoredRegistry(existing.registry);
+  const nextRegistry = normalizeStoredRegistry(next.registry);
+  if (
+    existingRegistry === null ||
+    nextRegistry === null ||
+    existingRegistry !== nextRegistry
+  ) {
+    changes.push({
+      field: "registry",
+      was: existing.registry,
+      now: nextRegistry ?? next.registry,
+    });
   }
   if (existing.dnsVersion !== next.dnsVersion) {
     changes.push({
@@ -359,10 +374,14 @@ type PinIdentity = {
 };
 
 function pinIdentityEqual(a: PinIdentity, b: PinIdentity): boolean {
+  const registryA = normalizeStoredRegistry(a.registry);
+  const registryB = normalizeStoredRegistry(b.registry);
   return (
     a.namespace === b.namespace &&
     a.package === b.package &&
-    a.registry === b.registry &&
+    registryA !== null &&
+    registryB !== null &&
+    registryA === registryB &&
     a.dnsVersion === b.dnsVersion
   );
 }
@@ -469,6 +488,20 @@ export function savePin(
         : current !== undefined && pinIdentityEqual(current, expectedExisting);
 
     if (!identityMatches) {
+      // Concurrent first-use of the same mapping: another process already wrote
+      // the identity we intended. Treat as success (refresh lastSeen) instead of
+      // failing a completed install over a race on an identical pin.
+      if (expectedAbsent && current !== undefined && pinIdentityEqual(current, validated.next)) {
+        const now = new Date().toISOString();
+        store[validated.domain] = {
+          ...validated.next,
+          firstSeen: current.firstSeen,
+          lastSeen: now,
+        };
+        writeAtomically(store);
+        return { ok: true };
+      }
+
       const changes =
         current !== undefined && expectedExisting !== undefined
           ? identityChanges(expectedExisting, current)

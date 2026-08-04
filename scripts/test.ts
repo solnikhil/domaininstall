@@ -189,6 +189,33 @@ async function main() {
     invalidSave.ok === false && invalidSave.reason === "invalid",
   );
 
+  // Concurrent first-use of the same identity should succeed (idempotent), not diverge.
+  resetPinStore();
+  const twinDomain = "twin.example";
+  const twinInput = {
+    namespace: "npm" as const,
+    package: "same-pkg",
+    registry: "https://registry.npmjs.org/",
+    dnsVersion: null as string | null,
+  };
+  check("twin first write", savePin(twinDomain, twinInput).ok === true);
+  const twinRace = savePin(twinDomain, twinInput); // expected absent, store already has same identity
+  check(
+    "savePin is idempotent when the same identity is already present",
+    twinRace.ok === true && getPin(twinDomain)?.package === "same-pkg",
+  );
+
+  // Restore a pin for the remaining permission / corrupt-state checks below.
+  check(
+    "restore smoke-test pin after twin checks",
+    savePin(testDomain, {
+      namespace: "npm",
+      package: "good-pkg",
+      registry: "https://registry.npmjs.org/",
+      dnsVersion: null,
+    }).ok === true,
+  );
+
   const isWindows = process.platform === "win32";
   const pinFile = join(state, "pins.json");
   const stored = JSON.parse(readFileSync(pinFile, "utf8")) as { version?: number };
@@ -660,7 +687,11 @@ globalThis.fetch = async () => new Response(JSON.stringify({
     oversized.outcome === "provider_exhaustion" && oversized.attempts[0]?.outcome === "malformed",
   );
 
-  const { assertEffectiveRegistryUnchanged } = await import("../dist/install.js");
+  const {
+    assertEffectiveRegistryUnchanged,
+    canonicalizeRegistryUrl,
+    registriesEqual,
+  } = await import("../dist/install.js");
   const regAgain = assertEffectiveRegistryUnchanged("stripe", "https://registry.npmjs.org/");
   check(
     "assertEffectiveRegistryUnchanged accepts stable public registry",
@@ -670,6 +701,21 @@ globalThis.fetch = async () => new Response(JSON.stringify({
   check(
     "assertEffectiveRegistryUnchanged detects registry drift",
     regMismatch.ok === false,
+  );
+  check(
+    "registry trailing-slash forms are equal",
+    registriesEqual("https://registry.npmjs.org", "https://registry.npmjs.org/") === true,
+  );
+  check(
+    "canonicalizeRegistryUrl lowercases host and adds trailing slash",
+    canonicalizeRegistryUrl("https://Registry.NPMJS.org") === "https://registry.npmjs.org/",
+  );
+  // assertEffectiveRegistryUnchanged should accept expected without trailing slash
+  // when npm returns the slash form (canonical equality).
+  const regSlash = assertEffectiveRegistryUnchanged("stripe", "https://registry.npmjs.org");
+  check(
+    "assertEffectiveRegistryUnchanged tolerates trailing-slash drift",
+    regSlash.ok === true,
   );
 
   rmSync(state, { recursive: true, force: true });
