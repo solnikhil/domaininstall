@@ -1,20 +1,20 @@
 # Release and rollback procedure
 
-No release command in this document should be run from a dirty checkout or an
-unprotected branch. Publication is an explicit external action and is not part
-of ordinary development or CI.
+Don’t run any release command from a dirty checkout or an unprotected branch.
+Publication is an explicit external action — not part of ordinary development
+or CI.
 
 ## Release input
 
-Set the version once in the clean release shell, without a leading `v`:
+Set the version once in a clean release shell, without a leading `v`:
 
 ```bash
 RELEASE_VERSION=0.0.3
 export RELEASE_VERSION
 ```
 
-Every command below uses that value. Confirm it matches the manifest before
-creating a tag:
+Every command below uses that value. Confirm it matches the manifest before you
+create a tag:
 
 ```bash
 test "$(node -p 'require("./package.json").version')" = "$RELEASE_VERSION"
@@ -42,8 +42,8 @@ Before creating `v${RELEASE_VERSION}`:
 
 ## First publication only (historical)
 
-The first publication uses `.github/workflows/publish-bootstrap.yml` because a
-trusted publisher cannot be attached until the package exists.
+The first publication used `.github/workflows/publish-bootstrap.yml` because a
+trusted publisher can’t be attached until the package exists.
 
 1. Create a granular npm token limited to publishing `domaininstall`, with the
    shortest practical expiry.
@@ -54,8 +54,8 @@ trusted publisher cannot be attached until the package exists.
 5. Verify the package, then immediately revoke the token and delete the secret.
 
 The workflow refuses branch refs, checks that the tag matches `package.json`,
-reruns deterministic tests/audit/package verification, and publishes with npm
-provenance.
+reruns deterministic tests / audit / package verification, and publishes with
+npm provenance.
 
 ## Later trusted publications
 
@@ -75,7 +75,7 @@ In npm package settings, configure the GitHub trusted publisher for repository
 4. Approve the protected `npm-production` deployment after verifying the tag
    and workflow inputs.
 
-The workflow requests only `contents: read` and `id-token: write`; it does not
+The workflow requests only `contents: read` and `id-token: write`. It does not
 use a reusable publish token.
 
 ## Post-publication verification
@@ -114,7 +114,7 @@ Published registry data is immutable, so never reuse a bad version number.
 2. Prefer `npm deprecate domaininstall@<version> "<reason and safe version>"`.
 3. Fix forward with a new patch version and repeat every release gate.
 4. Consider `npm unpublish domaininstall@<version>` only if the current npm
-   unpublish policy permits it and the impact justifies breaking consumers.
+   unpublish policy allows it and the impact justifies breaking consumers.
 
 npm currently permits some newly published packages to be unpublished within
 72 hours when no package depends on them. Unpublishing is irreversible, the

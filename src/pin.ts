@@ -340,20 +340,161 @@ export function diffPin(
   return { existing, changes };
 }
 
+export type SavePinInput = {
+  namespace: string;
+  package: string;
+  registry: string;
+  dnsVersion: string | null;
+};
+
+export type SavePinResult =
+  | { ok: true }
+  | { ok: false; reason: "diverged" | "invalid"; message: string; changes?: PinChange[] };
+
+type PinIdentity = {
+  namespace: string;
+  package: string;
+  registry: string;
+  dnsVersion: string | null;
+};
+
+function pinIdentityEqual(a: PinIdentity, b: PinIdentity): boolean {
+  return (
+    a.namespace === b.namespace &&
+    a.package === b.package &&
+    a.registry === b.registry &&
+    a.dnsVersion === b.dnsVersion
+  );
+}
+
+function identityChanges(was: PinIdentity, now: PinIdentity): PinChange[] {
+  const changes: PinChange[] = [];
+  if (was.namespace !== now.namespace) {
+    changes.push({ field: "namespace", was: was.namespace, now: now.namespace });
+  }
+  if (was.package !== now.package) {
+    changes.push({ field: "package", was: was.package, now: now.package });
+  }
+  if (was.registry !== now.registry) {
+    changes.push({ field: "registry", was: was.registry, now: now.registry });
+  }
+  if (was.dnsVersion !== now.dnsVersion) {
+    changes.push({
+      field: "dnsVersion",
+      was: was.dnsVersion ?? "latest",
+      now: now.dnsVersion ?? "latest",
+    });
+  }
+  return changes;
+}
+
+function validateSavePinInput(
+  domain: string,
+  next: SavePinInput,
+): { ok: true; domain: string; next: SavePinInput } | { ok: false; message: string } {
+  const domainCheck = validateDomain(domain);
+  if (!domainCheck.ok) {
+    return { ok: false, message: `Invalid domain for pin store: ${domainCheck.error}` };
+  }
+
+  if (typeof next.namespace !== "string" || !/^[a-z0-9]+$/.test(next.namespace)) {
+    return {
+      ok: false,
+      message: `Invalid pin namespace ${JSON.stringify(next.namespace)} (must match /^[a-z0-9]+$/).`,
+    };
+  }
+
+  if (typeof next.package !== "string") {
+    return { ok: false, message: "Invalid pin package: package name must be a string." };
+  }
+  const packageCheck = validatePackageName(next.package);
+  if (!packageCheck.ok) {
+    return { ok: false, message: `Invalid pin package: ${packageCheck.error}` };
+  }
+
+  const normalizedRegistry = normalizeStoredRegistry(next.registry);
+  if (!normalizedRegistry) {
+    return {
+      ok: false,
+      message: `Invalid pin registry ${JSON.stringify(next.registry)} (must be a valid https registry URL).`,
+    };
+  }
+
+  if (next.dnsVersion !== null) {
+    if (typeof next.dnsVersion !== "string") {
+      return { ok: false, message: "Invalid pin dnsVersion: must be a string or null." };
+    }
+    const versionCheck = validateVersionRange(next.dnsVersion);
+    if (!versionCheck.ok) {
+      return { ok: false, message: `Invalid pin dnsVersion: ${versionCheck.error}` };
+    }
+  }
+
+  return {
+    ok: true,
+    domain: domainCheck.value,
+    next: {
+      namespace: next.namespace,
+      package: packageCheck.value,
+      registry: normalizedRegistry,
+      dnsVersion: next.dnsVersion,
+    },
+  };
+}
+
+/**
+ * @param expectedExisting - pin identity observed at confirm time (undefined = expected no pin).
+ *   Under lock, if the store's current pin for domain does not match expectedExisting identity
+ *   (namespace/package/registry/dnsVersion), return { ok:false, reason:"diverged" } without writing.
+ *   Identity match ignores firstSeen/lastSeen.
+ */
 export function savePin(
   domain: string,
-  next: { namespace: string; package: string; registry: string; dnsVersion: string | null },
-): void {
-  withLock(() => {
+  next: SavePinInput,
+  expectedExisting?: Pin | undefined,
+): SavePinResult {
+  return withLock(() => {
+    const validated = validateSavePinInput(domain, next);
+    if (!validated.ok) {
+      return { ok: false, reason: "invalid", message: validated.message };
+    }
+
     const store = load();
+    const current = store[validated.domain];
+
+    const expectedAbsent = expectedExisting === undefined;
+    const identityMatches =
+      expectedAbsent
+        ? current === undefined
+        : current !== undefined && pinIdentityEqual(current, expectedExisting);
+
+    if (!identityMatches) {
+      const changes =
+        current !== undefined && expectedExisting !== undefined
+          ? identityChanges(expectedExisting, current)
+          : current !== undefined
+            ? identityChanges(current, validated.next)
+            : undefined;
+      return {
+        ok: false,
+        reason: "diverged",
+        message: expectedAbsent
+          ? `Trust pin for ${validated.domain} appeared while confirming; store was not updated.`
+          : current === undefined
+            ? `Trust pin for ${validated.domain} was removed while confirming; store was not updated.`
+            : `Trust pin for ${validated.domain} changed while confirming; store was not updated.`,
+        ...(changes !== undefined && changes.length > 0 ? { changes } : {}),
+      };
+    }
+
     const now = new Date().toISOString();
-    const existing = store[domain];
-    store[domain] = {
-      ...next,
-      firstSeen: existing?.firstSeen ?? now,
+    store[validated.domain] = {
+      ...validated.next,
+      firstSeen: current?.firstSeen ?? now,
       lastSeen: now,
     };
     writeAtomically(store);
+    return { ok: true };
   });
 }
 

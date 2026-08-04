@@ -302,6 +302,30 @@ export function buildInstallPlan(
   return { pm: "npm", spec, registry, global, argv, display: `npm ${argv.join(" ")}` };
 }
 
+/**
+ * Re-read npm config and ensure the package still resolves to `expectedRegistry`.
+ * Closes a TOCTOU window where @scope:registry could change after preview/confirm.
+ */
+export function assertEffectiveRegistryUnchanged(
+  pkg: string,
+  expectedRegistry: string,
+  cwd = process.cwd(),
+): RegistryResult {
+  // Call resolveEffectiveRegistry WITHOUT knownDefaultRegistry so both default
+  // and scoped registries are re-read from npm.
+  const resolved = resolveEffectiveRegistry(pkg, cwd);
+  if (!resolved.ok) return resolved;
+  if (resolved.registry !== expectedRegistry) {
+    return {
+      ok: false,
+      error:
+        `npm configuration changed since confirmation: ${pkg} now resolves to ${resolved.registry}, ` +
+        `not the confirmed registry ${expectedRegistry}. Install is refused.`,
+    };
+  }
+  return resolved;
+}
+
 export function runInstall(plan: InstallPlan): Promise<number> {
   return new Promise((resolve) => {
     const launcher = npmLauncher();

@@ -31,6 +31,7 @@ import {
 import {
   detectNpmProject,
   buildInstallPlan,
+  assertEffectiveRegistryUnchanged,
   npmScopeOf,
   resolveEffectiveRegistry,
   resolveNpmGlobalPrefix,
@@ -51,6 +52,8 @@ interface Resolved {
   domain: string;
   dnsName: string;
   authenticated: boolean;
+  /** DoH provider URL that returned the authoritative outcome, if any. */
+  provider: string | null;
   record: DnstallRecord;
   version?: string; // effective version after precedence
   cliVersion?: string;
@@ -102,9 +105,13 @@ async function resolveTarget(target: string): Promise<ResolveOutcome> {
 
   const mappings = distinctRecordMappings(npmRecords);
   if (mappings.length > 1) {
+    const listed = mappings
+      .map((m) => `${m.namespace}/${m.package}${m.version ? `@${m.version}` : ""}`)
+      .join(", ");
     return {
       ok: false,
-      message: `Conflicting domaininstall mappings found at ${dnsName}; refusing to choose one.`,
+      message: `Conflicting domaininstall mappings found at ${dnsName}; refusing to choose one. Found: ${listed}.`,
+      hint: `Run ${c.bold(`di verify ${effectiveDomain}`)} to inspect every record.`,
     };
   }
   const record = mappings[0]!;
@@ -124,6 +131,7 @@ async function resolveTarget(target: string): Promise<ResolveOutcome> {
     domain: effectiveDomain,
     dnsName,
     authenticated: txt.authenticated,
+    provider: txt.provider,
     record,
   };
   if (effectiveVersion) resolved.version = effectiveVersion;
@@ -131,8 +139,13 @@ async function resolveTarget(target: string): Promise<ResolveOutcome> {
   return { ok: true, resolved };
 }
 
+/** AD bit from the recursive DoH resolver — not client-validated DNSSEC, not ownership proof. */
 function dnssecBadge(authenticated: boolean): string {
-  return authenticated ? c.green("DNSSEC ✓") : c.gray("DNSSEC —");
+  // Wording from docs/research/FINDINGS-POSITIONING.md + FINDINGS-DOH.md:
+  // avoid a bare green check that reads as "package safe".
+  return authenticated
+    ? c.green("DNSSEC: AD")
+    : c.gray("DNSSEC: no AD");
 }
 
 function resolverName(provider: string): string {
@@ -155,13 +168,16 @@ function printResolverAttempts(attempts: DnsAttempt[]): void {
 function printSummary(r: Resolved, commandDisplay: string, target: string, registry: string): void {
   info("");
   info(`  ${c.dim("domain")}    ${c.bold(r.domain)}   ${dnssecBadge(r.authenticated)}`);
+  if (r.provider) {
+    info(`  ${c.dim("resolver")}  ${c.dim(resolverName(r.provider))}`);
+  }
   info(`  ${c.dim("package")}   ${c.bold(r.record.package)}`);
   info(
     `  ${c.dim("version")}   ${r.version ? c.bold(r.version) : c.dim("latest")}` +
       (r.cliVersion ? c.dim("  (CLI override)") : ""),
   );
   info(`  ${c.dim("DNS policy")} ${r.record.version ? c.bold(r.record.version) : c.dim("latest")}`);
-  info(`  ${c.dim("registry")}  ${registry}`);
+  info(`  ${c.dim("registry")}  ${c.dim(registry)}`);
   info(`  ${c.dim("scripts")}   ${c.bold("disabled")}`);
   info(`  ${c.dim("into")}      ${sanitizeTerminalText(target)}`);
   if (r.record.metadata.repo) {
@@ -220,7 +236,7 @@ async function cmdInstall(target: string, opts: { yes: boolean; global: boolean 
   const outcome = await resolveTarget(target);
   if (!outcome.ok) {
     error(outcome.message);
-    if (outcome.hint) info("\n  " + outcome.hint + "\n");
+    if (outcome.hint) detail("\n  " + outcome.hint + "\n");
     return 1;
   }
   const r = outcome.resolved;
@@ -244,12 +260,13 @@ async function cmdInstall(target: string, opts: { yes: boolean; global: boolean 
   printSummary(r, plan.display, installTargetDescription(opts.global), registry);
 
   // TOFU pin check — the domain-hijack defense.
-  const { existing, changes } = diffPin(r.domain, {
+  const pinNext = {
     namespace: r.record.namespace,
     package: r.record.package,
     registry,
     dnsVersion: r.record.version ?? null,
-  });
+  };
+  const { existing, changes } = diffPin(r.domain, pinNext);
 
   let requireInteractive = false;
   if (changes.length > 0) {
@@ -271,14 +288,31 @@ async function cmdInstall(target: string, opts: { yes: boolean; global: boolean 
     }
   }
 
+  // Close local config TOCTOU: @scope:registry can change after preview/confirm.
+  const registryRecheck = assertEffectiveRegistryUnchanged(r.record.package, registry);
+  if (!registryRecheck.ok) {
+    error(registryRecheck.error);
+    return 1;
+  }
+
   const code = await runInstall(plan);
   if (code === 0) {
-    savePin(r.domain, {
-      namespace: r.record.namespace,
-      package: r.record.package,
-      registry,
-      dnsVersion: r.record.version ?? null,
-    });
+    // CAS under lock: refuse to overwrite if another process changed the pin mid-install.
+    const saved = savePin(r.domain, pinNext, existing);
+    if (!saved.ok) {
+      error(saved.message);
+      if (saved.changes && saved.changes.length > 0) {
+        for (const ch of saved.changes) {
+          detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
+        }
+      }
+      detail(
+        ce.dim(
+          `  ${plan.spec} was installed, but the trust pin was not updated. Run di verify ${r.domain}.`,
+        ),
+      );
+      return 1;
+    }
     success(`Installed ${plan.spec} from ${r.domain}`);
   } else {
     error(`Install failed (${plan.pm} exited with code ${code}).`);
@@ -316,7 +350,7 @@ async function cmdVerify(target: string): Promise<number> {
         ? "The requested DNS name does not exist (NXDOMAIN)."
         : "The DNS name exists but has no TXT answer (NODATA).",
     );
-    info(
+    detail(
       `\n  To enable it, publish:\n    ${c.dim(`${dnsName}  TXT  "dnstall=pkg:npm/<package>"`)}\n`,
     );
     return 1;
@@ -368,16 +402,17 @@ async function cmdVerify(target: string): Promise<number> {
     }
   }
 
-  // A scoped package is the one case where local npm configuration can send the
-  // install somewhere other than the default registry, so say so before install.
-  if (npmScopeOf(supportedRecord.package)) {
-    const effective = resolveEffectiveRegistry(supportedRecord.package);
-    if (effective.ok) {
+  // Effective registry for pin continuity comparison (and scoped-package honesty).
+  let effectiveRegistry: string | undefined;
+  const effective = resolveEffectiveRegistry(supportedRecord.package);
+  if (effective.ok) {
+    effectiveRegistry = effective.registry;
+    if (npmScopeOf(supportedRecord.package)) {
       info(c.dim(`  registry for this package: ${effective.registry}`));
-    } else {
-      info("");
-      warn(effective.error);
     }
+  } else if (npmScopeOf(supportedRecord.package)) {
+    info("");
+    warn(effective.error);
   }
 
   const pin = getPin(effectiveDomain);
@@ -386,12 +421,36 @@ async function cmdVerify(target: string): Promise<number> {
     info(c.dim(`  pin: first seen ${pin.firstSeen.slice(0, 10)} → ${pin.package} (${pin.namespace})`));
     info(c.dim(`  pin DNS policy: ${pin.dnsVersion ?? "latest"}`));
     info(c.dim(`  pin registry: ${pin.registry}`));
+
+    const pinNext = {
+      namespace: supportedRecord.namespace,
+      package: supportedRecord.package,
+      // If npm config cannot be read, compare other fields only by holding registry constant.
+      registry: effectiveRegistry ?? pin.registry,
+      dnsVersion: supportedRecord.version ?? null,
+    };
+    const { changes } = diffPin(effectiveDomain, pinNext);
+    if (changes.length > 0) {
+      info("");
+      warn("Live DNS/registry mapping does not match the local trust pin.");
+      for (const ch of changes) {
+        detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
+      }
+      detail(ce.dim("    Record syntax is valid, but continuity check failed."));
+      detail(ce.dim("    Install would require interactive confirmation ( --yes is ignored )."));
+      return 1;
+    }
+    info(c.dim("  pin: matches live mapping"));
   } else {
     info(c.dim("  pin: none yet (will be recorded on first install)"));
   }
   info(c.dim(`  pin file: ${PIN_FILE}`));
   info("");
-  success("Record looks valid.");
+  if (pin) {
+    success("Record looks valid and matches the trust pin.");
+  } else {
+    success("Record looks valid.");
+  }
   return 0;
 }
 
@@ -454,7 +513,7 @@ ${c.dim("EXAMPLES")}
   di verify zuraai.xyz               check the record without installing
 
 ${c.dim("OPTIONS")}
-  -y, --yes        skip the confirmation prompt (ignored if the mapping changed)
+  -y, --yes        skip confirmation when the pin is unchanged (not a review of first use)
   -g, --global     install globally (npm install --global)
   -h, --help       show this help
   -V, --version    show version
@@ -466,6 +525,9 @@ ${c.dim("HOW IT WORKS")}
   domaininstall resolves it over DNS-over-HTTPS, shows you exactly what will be
   installed, remembers the mapping (trust-on-first-use), and hands off to your
   npm with lifecycle scripts disabled. It never executes text from the DNS record.
+  First use has nothing to compare against; --yes skips the prompt only when the
+  remembered pin still matches. DNSSEC lines report the resolver AD bit only
+  (DNSSEC: AD / DNSSEC: no AD) — not package safety.
 `;
 
 async function main(): Promise<number> {

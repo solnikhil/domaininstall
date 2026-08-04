@@ -14,6 +14,13 @@ const DOH_PROVIDERS = [
 
 const TXT_TYPE = 16;
 
+/** Max DoH response body size before JSON parse (256 KiB). */
+export const MAX_DOH_BODY_BYTES = 262144;
+/** Max Answer array length accepted from a DoH response. */
+export const MAX_DOH_ANSWER_COUNT = 64;
+/** Max characters per Answer data string. */
+export const MAX_DOH_DATA_CHARS = 4096;
+
 export type DnsAttemptOutcome =
   | "answer"
   | "nodata"
@@ -49,10 +56,31 @@ export interface ResolveTxtOptions {
   timeoutMs?: number;
 }
 
+interface DohAnswer {
+  type: number;
+  data: string;
+  /** Optional owner name from the resolver (QNAME binding when present). */
+  name?: string;
+}
+
+interface DohResponse {
+  Status: number;
+  AD?: boolean;
+  Answer?: DohAnswer[];
+}
+
 interface ProviderResult {
   attempt: DnsAttempt;
   records: string[];
   authenticated: boolean;
+}
+
+function malformed(provider: string): ProviderResult {
+  return {
+    attempt: { provider, outcome: "malformed" },
+    records: [],
+    authenticated: false,
+  };
 }
 
 function normalizeTxtData(raw: string): string {
@@ -66,28 +94,67 @@ function normalizeTxtData(raw: string): string {
   return s;
 }
 
+/** Case-insensitive DNS name compare; trailing dots ignored. */
+function dnsNamesEqual(a: string, b: string): boolean {
+  const norm = (s: string) => s.replace(/\.+$/u, "").toLowerCase();
+  return norm(a) === norm(b);
+}
+
 function isTimeout(error: unknown): boolean {
   return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 }
 
-function isDohResponse(value: unknown): value is {
-  Status: number;
-  AD?: boolean;
-  Answer?: Array<{ type: number; data: string }>;
-} {
+function isDohResponse(value: unknown): value is DohResponse {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   if (typeof candidate.Status !== "number" || !Number.isInteger(candidate.Status)) return false;
   if (candidate.AD !== undefined && typeof candidate.AD !== "boolean") return false;
   if (candidate.Answer === undefined) return true;
   if (!Array.isArray(candidate.Answer)) return false;
-  return candidate.Answer.every(
-    (answer) =>
-      typeof answer === "object" &&
-      answer !== null &&
-      typeof (answer as Record<string, unknown>).type === "number" &&
-      typeof (answer as Record<string, unknown>).data === "string",
-  );
+  return candidate.Answer.every((answer) => {
+    if (typeof answer !== "object" || answer === null) return false;
+    const row = answer as Record<string, unknown>;
+    if (typeof row.type !== "number" || typeof row.data !== "string") return false;
+    if (row.name !== undefined && typeof row.name !== "string") return false;
+    return true;
+  });
+}
+
+/**
+ * For Status===0 TXT answers: drop nothing silently when a wrong owner name
+ * appears (malformed). Answers without `name` stay allowed for fixture compat.
+ */
+function bindTxtAnswers(
+  answers: DohAnswer[],
+  queriedName: string,
+): { ok: true; records: string[] } | { ok: false } {
+  const txt = answers.filter((answer) => answer.type === TXT_TYPE);
+
+  let sawWrongName = false;
+  const accepted: DohAnswer[] = [];
+
+  for (const answer of txt) {
+    if (answer.name === undefined) {
+      accepted.push(answer);
+      continue;
+    }
+    if (dnsNamesEqual(answer.name, queriedName)) {
+      accepted.push(answer);
+    } else {
+      sawWrongName = true;
+    }
+  }
+
+  // Any wrong-name TXT is unusable; wrong-name-only sets are malformed.
+  // (Matching + wrong-name in the same response is also rejected.)
+  if (sawWrongName) {
+    return { ok: false };
+  }
+
+  return {
+    ok: true,
+    records: accepted.map((answer) => normalizeTxtData(answer.data)).sort(),
+  };
 }
 
 async function queryProvider(
@@ -102,6 +169,7 @@ async function queryProvider(
     response = await fetchImpl(url, {
       headers: { accept: "application/dns-json" },
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: "error",
     });
   } catch (error) {
     return {
@@ -119,23 +187,34 @@ async function queryProvider(
     };
   }
 
+  let body: string;
+  try {
+    body = await response.text();
+  } catch {
+    return malformed(provider);
+  }
+
+  if (body.length > MAX_DOH_BODY_BYTES) {
+    return malformed(provider);
+  }
+
   let json: unknown;
   try {
-    json = await response.json();
+    json = JSON.parse(body) as unknown;
   } catch {
-    return {
-      attempt: { provider, outcome: "malformed" },
-      records: [],
-      authenticated: false,
-    };
+    return malformed(provider);
   }
 
   if (!isDohResponse(json)) {
-    return {
-      attempt: { provider, outcome: "malformed" },
-      records: [],
-      authenticated: false,
-    };
+    return malformed(provider);
+  }
+
+  const answers = json.Answer ?? [];
+  if (answers.length > MAX_DOH_ANSWER_COUNT) {
+    return malformed(provider);
+  }
+  if (answers.some((answer) => answer.data.length > MAX_DOH_DATA_CHARS)) {
+    return malformed(provider);
   }
 
   const status = json.Status;
@@ -156,14 +235,14 @@ async function queryProvider(
     return { attempt: { provider, outcome: "dns_error", status }, records: [], authenticated: false };
   }
 
-  const answers = json.Answer ?? [];
-  const records = answers
-    .filter((answer) => answer.type === TXT_TYPE)
-    .map((answer) => normalizeTxtData(answer.data))
-    .sort();
+  const bound = bindTxtAnswers(answers, name);
+  if (!bound.ok) {
+    return malformed(provider);
+  }
+
   return {
-    attempt: { provider, outcome: records.length > 0 ? "answer" : "nodata", status },
-    records,
+    attempt: { provider, outcome: bound.records.length > 0 ? "answer" : "nodata", status },
+    records: bound.records,
     authenticated: json.AD === true,
   };
 }

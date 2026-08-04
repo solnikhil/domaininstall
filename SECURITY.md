@@ -2,73 +2,85 @@
 
 ## Project status
 
-`domaininstall` is an early alpha. Only the latest published version and the
-current `main` branch receive fixes; older versions are not patched. Security
-reports are welcome and are handled on a best-effort basis by a single
-maintainer.
+`domaininstall` is early alpha. Only the latest published version and the
+current `main` branch get fixes — older versions are not patched. Security
+reports are welcome and handled on a best-effort basis by a single maintainer.
 
-## Security boundary
+## What we actually claim
 
-The intended security claim is deliberately narrow:
+The security promise is intentionally narrow:
 
 > `domaininstall` verifies continuity of a domain-to-package declaration. It
-> does not prove that a package or package version is safe.
+> does **not** prove that a package or package version is safe.
 
-The project currently trusts:
+In practice, the tool currently trusts:
 
-- the domain administrator to publish the intended package declaration;
-- the configured DNS-over-HTTPS providers and TLS connection;
-- npm and the effective HTTPS registry reported by npm configuration; and
-- the local TOFU store for continuity after the first successful install.
+- the domain administrator to publish the intended package declaration
+- the configured DNS-over-HTTPS providers and the TLS connection to them
+- npm and the effective HTTPS registry reported by your npm configuration
+- the local trust-on-first-use (TOFU) store for continuity after the first
+  successful install
 
 DNS responses, TXT metadata, package content, package-manager configuration,
-and terminal-facing strings are treated as untrusted inputs. DNSSEC can
-authenticate DNS data, but it does not prove continued ownership after a domain
-transfer and does not authenticate npm package contents.
+and anything shown in the terminal are treated as untrusted inputs.
 
-The P0 security gate in [ROADMAP.md](ROADMAP.md) was completed before the first
-published release; that file tracks the hardening work that remains.
+DNSSEC can authenticate DNS data in transit, but it does **not** prove continued
+ownership after a domain transfer, and it does **not** authenticate npm package
+contents.
 
-The current alpha supports npm only. It pins the effective registry into the
-displayed and executed command, refuses an install when a scope-specific
-registry would divert the request away from that pinned registry, disables
-dependency lifecycle scripts with `--ignore-scripts`, rejects conflicting DNS
-mappings, and treats corrupt or unsafe TOFU state as a blocking error. On
-Windows it invokes npm's own CLI entry point with the current Node binary rather
-than passing a command line through `cmd.exe`, so version ranges such as `^18`
-are never interpreted by a shell. These controls narrow execution risk; they do
-not make the selected package trustworthy.
+The P0 security gate in [ROADMAP.md](ROADMAP.md) was finished before the first
+published release. That file also tracks the hardening work that remains.
 
-Trust-state hardening differs by platform. macOS and Linux enforce owner-only
-mode bits and use no-follow file opens. Windows rejects a symlinked state
-directory, validates the store, locks writers, and uses atomic replacement, but
-Node does not expose the same file-level no-follow and POSIX ownership
-guarantees; the store additionally relies on the user-profile directory ACL.
+### What the alpha already does
+
+- Pins the effective registry into both the preview and the command that runs
+- Refuses an install when a scope-specific registry would divert the request
+  away from that pinned registry
+- Disables dependency lifecycle scripts with `--ignore-scripts`
+- Rejects conflicting DNS mappings instead of picking one silently
+- Treats corrupt or unsafe TOFU state as a hard error
+- On Windows, runs npm’s own CLI entry point with the current Node binary
+  instead of routing arguments through `cmd.exe` (so ranges like `^18` are never
+  interpreted by a shell)
+
+These controls narrow execution risk. They do **not** make the selected package
+trustworthy.
+
+### Trust store notes by platform
+
+Trust-state hardening differs by OS:
+
+- **macOS and Linux** enforce owner-only mode bits and use no-follow file opens.
+- **Windows** rejects a symlinked state directory, validates the store, locks
+  writers, and uses atomic replacement — but Node doesn’t expose the same
+  file-level no-follow and POSIX ownership guarantees. The store also relies on
+  the user-profile directory ACL.
 
 ## Reporting a vulnerability
 
-Do not publish exploit details in a public issue.
+Please **don’t** publish exploit details in a public issue.
 
-Use GitHub's **Report a vulnerability** flow when private vulnerability
-reporting is enabled for the repository. If that option is unavailable, open a
-minimal issue asking the maintainer to establish a private contact channel; do
-not include reproduction steps or sensitive details in that issue.
+Use GitHub’s **Report a vulnerability** flow when private reporting is enabled
+for the repository. If that option isn’t available, open a minimal issue asking
+the maintainer to set up a private contact channel — and leave out reproduction
+steps or sensitive details.
 
-Useful reports include:
+Useful reports often cover things like:
 
-- terminal/control-sequence injection;
-- argument or registry smuggling;
-- incorrect DNS failure handling or ambiguous-record selection;
-- TOFU bypass, state corruption, unsafe file handling, or concurrency loss;
-- an install occurring without the required confirmation; and
-- discrepancies between the package/registry shown and what is installed.
+- terminal or control-sequence injection
+- argument or registry smuggling
+- incorrect DNS failure handling or ambiguous-record selection
+- TOFU bypass, state corruption, unsafe file handling, or concurrency bugs
+- an install happening without the required confirmation
+- a mismatch between the package/registry shown and what actually gets installed
 
-Please include the affected commit or version, platform, Node/package-manager
-versions, impact, and a minimal reproduction when it is safe to do so.
+When it’s safe to include them, please share the affected commit or version,
+platform, Node and package-manager versions, impact, and a minimal reproduction.
 
 ## Disclosure
 
 The maintainer will acknowledge reports when practical, validate impact, and
-coordinate a fix and disclosure timeline appropriate to the pre-release status.
-Do not treat the absence of a response-time guarantee as permission to disclose
-private user data or active credentials.
+coordinate a fix and disclosure timeline that fits the pre-release status.
+
+No fixed response-time SLA is promised. That doesn’t mean private user data or
+active credentials should ever be disclosed publicly.

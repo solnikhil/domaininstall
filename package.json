@@ -37,9 +37,9 @@
     "package-manager",
     "npm",
     "typosquatting",
-    "provenance",
     "dnslink",
-    "supply-chain"
+    "supply-chain",
+    "tofu"
   ],
   "license": "MIT",
   "publishConfig": {
