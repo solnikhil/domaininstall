@@ -16,14 +16,25 @@ concurrency:
 
 jobs:
   live-dns-install:
-    runs-on: ubuntu-latest
+    name: live-dns-install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    strategy:
+      # A live suite must report every platform's result: a Windows-only DNS or
+      # npm-launcher failure is exactly what this workflow exists to catch, so
+      # one platform failing must not cancel the others.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.3
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
+          # The minimum supported version, so the live path is exercised against
+          # the floor of the supported range. Both supported versions are covered
+          # deterministically by CI.
           node-version: 22.14.0
           cache: npm
       - run: npm ci
