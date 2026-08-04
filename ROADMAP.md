@@ -73,7 +73,7 @@ repository, or a local run — not inferred from an older review.
 | Retired branches | `feat/v0` is fully merged into `main` and retired — don’t branch from it | Merge history |
 | Deterministic suite | 82 passed (+ exhaustive suite), 0 failed | `npm test` on Node 22.14 |
 | CI matrix | 6 jobs: `ubuntu` / `macos` / `windows-latest` × Node `22.14.0` / `24.x` | `.github/workflows/ci.yml` |
-| Live E2E | Ubuntu only; weekly cron, manual dispatch, and `v*` tags | `.github/workflows/e2e.yml` |
+| Live E2E | Linux, macOS, and Windows on Node 22.14; weekly cron, manual dispatch, and `v*` tags. Covers a project-scoped install, a global install into an isolated prefix, pin continuity, and `di verify` | `.github/workflows/e2e.yml`, `scripts/e2e.ts` |
 | Reference mapping | `_dnstall.zuraai.xyz` → `dnstall=pkg:npm/zuraai` resolves | Live E2E |
 | External adoption | **Zero.** The only published mapping is the maintainer’s own domain | Milestone 4 quiet beta not complete; no external mapping live |
 | M4 validation kit | Measurement materials and publisher guide under `docs/m4/` | Kit in progress; human gates not started |
@@ -174,11 +174,16 @@ Launcher probe and residual risks:
 **Gate remains open** until the same checks run on a clean Windows machine and
 are recorded here.
 
-This is the one incomplete item on the `0.0.3` line. It matters more than usual
-because `0.0.3` introduced the Windows npm launcher, and because live E2E runs
-on Ubuntu only — so no automated job exercises a real Windows install. Until
-this is done, Windows support is covered by unit tests and the CI build, but not
-by a clean-machine end-to-end install from the published artifact.
+This is the one incomplete item in the `0.0.3` line, and it stays open because it
+tests something automation cannot: that the **published tarball** installs and
+runs on a machine that is not a CI runner.
+
+Live E2E now runs on Linux, macOS, and Windows and exercises a real global
+install, so the *source* is covered on every supported platform. What remains
+unverified is the artifact path in `docs/RELEASE.md` — installing
+`domaininstall@0.0.3` from the public registry under an empty
+`NPM_CONFIG_USERCONFIG`, confirming all three executable aliases, and running
+`npm audit signatures`. That has to be done by hand, on Windows, once.
 
 **Exit gate.** A fresh global install of `0.0.3` works on macOS, Linux, and
 Windows, and the published artifact is reproducible from its tag.
@@ -341,7 +346,7 @@ Pursue in this order — and only after the validation gate.
 | R4 | Both DoH providers blocked or degraded | Tool unusable on that network | Fail closed with a distinct outcome rather than downgrading | Reported by any real user (G3) |
 | R5 | A mapped domain expires and is re-registered | Hijack of first-time installs | Layers 1–2 today; Layers 3–5 unbuilt | Any real external mapping exists (raises G9 priority) |
 | R6 | Single-maintainer bus factor | Unpatched vulnerability | Stated plainly in `SECURITY.md`; narrow scope; zero dependencies | External adoption reaches gate 5 thresholds |
-| R7 | Windows-only regression ships undetected | Broken installs on a supported platform | Six-job CI matrix | Live E2E remains Linux-only while §4’s Windows gate is open |
+| R7 | Windows-only regression ships undetected | Broken installs on a supported platform | Six-job CI matrix, plus live E2E on all three platforms covering project and global installs | A platform-specific install path is added (another package manager, or scope-registry support) without matching live coverage |
 
 ---
 
