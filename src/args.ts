@@ -5,6 +5,8 @@ export type CliCommand =
   | { kind: "install"; target: string; yes: boolean; global: boolean }
   | { kind: "verify"; target: string }
   | { kind: "setup"; target: string; packageSpec: string }
+  | { kind: "trust_list" }
+  | { kind: "trust_forget"; domain: string; force: boolean }
   | { kind: "trust_reset"; force: boolean };
 
 export type CliParseResult = { ok: true; command: CliCommand } | { ok: false; error: string };
@@ -45,14 +47,40 @@ export function parseCliArgs(args: string[]): CliParseResult {
   }
 
   if (positionals[0] === "trust") {
-    if (positionals.length !== 2 || positionals[1] !== "reset") {
-      return { ok: false, error: "usage: di trust reset --all [--force]" };
+    const subcommand = positionals[1];
+
+    if (subcommand === "list") {
+      if (positionals.length !== 2) return { ok: false, error: "usage: di trust list" };
+      if (flags.length > 0) return { ok: false, error: "trust list does not accept options." };
+      return { ok: true, command: { kind: "trust_list" } };
     }
-    if (!flags.includes("--all")) return { ok: false, error: "trust reset requires --all." };
-    if (flags.some((flag) => flag !== "--all" && flag !== "--force")) {
-      return { ok: false, error: "Only --all and --force are valid with trust reset." };
+
+    if (subcommand === "forget") {
+      if (positionals.length !== 3) {
+        return { ok: false, error: "usage: di trust forget <domain> [--force]" };
+      }
+      if (flags.some((flag) => flag !== "--force")) {
+        return { ok: false, error: "Only --force is valid with trust forget." };
+      }
+      return {
+        ok: true,
+        command: { kind: "trust_forget", domain: positionals[2]!, force: flags.includes("--force") },
+      };
     }
-    return { ok: true, command: { kind: "trust_reset", force: flags.includes("--force") } };
+
+    if (subcommand === "reset") {
+      if (positionals.length !== 2) return { ok: false, error: "usage: di trust reset --all [--force]" };
+      if (!flags.includes("--all")) return { ok: false, error: "trust reset requires --all." };
+      if (flags.some((flag) => flag !== "--all" && flag !== "--force")) {
+        return { ok: false, error: "Only --all and --force are valid with trust reset." };
+      }
+      return { ok: true, command: { kind: "trust_reset", force: flags.includes("--force") } };
+    }
+
+    return {
+      ok: false,
+      error: "usage: di trust list | di trust forget <domain> [--force] | di trust reset --all [--force]",
+    };
   }
 
   if (positionals[0] === "verify") {

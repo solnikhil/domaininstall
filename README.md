@@ -81,6 +81,11 @@ The pin also records the DNS version policy and the effective npm registry. A
 one-off version override on the command line won’t silently replace the
 domain’s policy.
 
+`di trust list` shows what is remembered, and `di trust forget <domain>` removes
+a single mapping without disturbing the others. Both confirm before changing
+anything, and forgetting a domain means its next install is treated as a first
+use again.
+
 ## What it does not promise
 
 `domaininstall` does **not** prove that:
@@ -145,6 +150,8 @@ di <domain>[/sub][@version]    resolve, confirm, and install
 di <domain> --global           install globally instead of into this project
 di verify <domain>             inspect a declaration without installing
 di setup <domain> <package>    print the TXT record a publisher must add
+di trust list                  show every remembered mapping
+di trust forget <domain>       remove one remembered mapping
 di trust reset --all           back up and reset all saved mappings
 di --help                      show the complete command reference
 di --version                   print the CLI version

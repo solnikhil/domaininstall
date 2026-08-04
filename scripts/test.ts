@@ -340,6 +340,78 @@ async function main() {
     );
   }
 
+  console.log("\n4b. Granular trust management");
+  const listState = mkdtempSync(join(tmpdir(), "dnstall-list-"));
+  {
+    // A dedicated store keeps these assertions independent of the pins written
+    // by the section above.
+    const child = (code: string) =>
+      spawnSync(process.execPath, ["--input-type=module", "--eval", code], {
+        encoding: "utf8",
+        env: { ...process.env, DOMAININSTALL_STATE_DIR: listState },
+      });
+    const pinUrl = new URL("../dist/pin.js", import.meta.url).href;
+    const seed = child(
+      `import { savePin } from ${JSON.stringify(pinUrl)};
+savePin("zeta.example", { namespace: "npm", package: "zeta", registry: "https://registry.npmjs.org/", dnsVersion: "^2" });
+savePin("alpha.example", { namespace: "npm", package: "@acme/alpha", registry: "https://registry.npmjs.org/", dnsVersion: null });`,
+    );
+    const listed = child(
+      `import { listPins } from ${JSON.stringify(pinUrl)};
+process.stdout.write(JSON.stringify(listPins().map((pin) => [pin.domain, pin.package, pin.dnsVersion])));`,
+    );
+    check(
+      "lists every pin sorted by domain",
+      seed.status === 0 &&
+        listed.status === 0 &&
+        listed.stdout ===
+          JSON.stringify([
+            ["alpha.example", "@acme/alpha", null],
+            ["zeta.example", "zeta", "^2"],
+          ]),
+    );
+    const forgotten = child(
+      `import { forgetPin, getPin, listPins } from ${JSON.stringify(pinUrl)};
+const removed = forgetPin("alpha.example");
+process.stdout.write(JSON.stringify({
+  removedPackage: removed?.package ?? null,
+  alphaStillPresent: getPin("alpha.example") !== undefined,
+  survivors: listPins().map((pin) => pin.domain),
+  secondRemoval: forgetPin("alpha.example") ?? null,
+}));`,
+    );
+    const forgetResult = forgotten.status === 0
+      ? (JSON.parse(forgotten.stdout) as {
+          removedPackage: string | null;
+          alphaStillPresent: boolean;
+          survivors: string[];
+          secondRemoval: unknown;
+        })
+      : undefined;
+    check(
+      "forget removes only the named domain and returns what it removed",
+      forgetResult?.removedPackage === "@acme/alpha" &&
+        forgetResult.alphaStillPresent === false &&
+        JSON.stringify(forgetResult.survivors) === JSON.stringify(["zeta.example"]),
+    );
+    check("forgetting an unknown domain reports nothing removed", forgetResult?.secondRemoval === null);
+    check(
+      "forget leaves a valid v1 store with no temp or lock files",
+      (JSON.parse(readFileSync(join(listState, "pins.json"), "utf8")) as { version?: number }).version === 1 &&
+        !readdirSync(listState).some((name) => name.endsWith(".tmp") || name === "pins.lock"),
+    );
+    const corruptListState = mkdtempSync(join(tmpdir(), "dnstall-list-corrupt-"));
+    writeFileSync(join(corruptListState, "pins.json"), "not json", "utf8");
+    const corruptList = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", `import { listPins } from ${JSON.stringify(pinUrl)}; listPins();`],
+      { encoding: "utf8", env: { ...process.env, DOMAININSTALL_STATE_DIR: corruptListState } },
+    );
+    check("listing a corrupt store fails closed instead of reporting no pins", corruptList.status !== 0);
+    rmSync(corruptListState, { recursive: true, force: true });
+  }
+  rmSync(listState, { recursive: true, force: true });
+
   const pinModule = new URL("../dist/pin.js", import.meta.url).href;
   const runWriter = (index: number) =>
     new Promise<number>((resolve) => {
@@ -543,6 +615,91 @@ async function main() {
     "--help keeps the full command reference",
     help.status === 0 && help.stdout.includes("USAGE") && help.stdout.includes("OPTIONS"),
   );
+  check(
+    "--help documents granular trust management",
+    globalHelp.stdout.includes("di trust list") && globalHelp.stdout.includes("di trust forget <domain>"),
+  );
+  const trustCliState = mkdtempSync(join(tmpdir(), "dnstall-trust-cli-"));
+  const runTrustCli = (args: string[]) =>
+    spawnSync(process.execPath, [cli, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, DOMAININSTALL_STATE_DIR: trustCliState },
+    });
+  const emptyList = runTrustCli(["trust", "list"]);
+  check(
+    "trust list reports an empty store without failing",
+    emptyList.status === 0 && emptyList.stdout.includes("No remembered mappings yet"),
+  );
+  spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { savePin } from ${JSON.stringify(pinModule)};
+savePin("kept.example", { namespace: "npm", package: "kept", registry: "https://registry.npmjs.org/", dnsVersion: null });
+savePin("dropped.example", { namespace: "npm", package: "dropped", registry: "https://registry.npmjs.org/", dnsVersion: "^3" });`,
+    ],
+    { env: { ...process.env, DOMAININSTALL_STATE_DIR: trustCliState } },
+  );
+  const populatedList = runTrustCli(["trust", "list"]);
+  check(
+    "trust list shows each mapping with its policy",
+    populatedList.status === 0 &&
+      populatedList.stdout.includes("2 remembered mappings") &&
+      populatedList.stdout.includes("dropped.example") &&
+      populatedList.stdout.includes("kept.example") &&
+      populatedList.stdout.includes("^3") &&
+      populatedList.stdout.includes("latest"),
+  );
+  const forgetUnknown = runTrustCli(["trust", "forget", "never-pinned.example", "--force"]);
+  check(
+    "trust forget reports an unknown domain on stderr and exits non-zero",
+    forgetUnknown.status === 1 && forgetUnknown.stderr.includes("No remembered mapping"),
+  );
+  const forgetInvalid = runTrustCli(["trust", "forget", "not-a-domain", "--force"]);
+  check("trust forget rejects a malformed domain", forgetInvalid.status === 1);
+  // Without a TTY, confirm() declines, so an unforced removal must not proceed.
+  const forgetUnconfirmed = runTrustCli(["trust", "forget", "dropped.example"]);
+  check(
+    "trust forget will not remove a pin non-interactively without --force",
+    forgetUnconfirmed.status === 130 &&
+      (
+        JSON.parse(readFileSync(join(trustCliState, "pins.json"), "utf8")) as {
+          pins: Record<string, unknown>;
+        }
+      ).pins["dropped.example"] !== undefined,
+  );
+  const forgetForced = runTrustCli(["trust", "forget", "DROPPED.example", "--force"]);
+  const afterForget = JSON.parse(readFileSync(join(trustCliState, "pins.json"), "utf8")) as {
+    version?: number;
+    pins: Record<string, unknown>;
+  };
+  check(
+    "trust forget --force removes one mapping, case-insensitively, and keeps the rest",
+    forgetForced.status === 0 &&
+      afterForget.version === 1 &&
+      afterForget.pins["dropped.example"] === undefined &&
+      afterForget.pins["kept.example"] !== undefined,
+  );
+  check(
+    "trust forget does not create a backup file the way a full reset does",
+    !readdirSync(trustCliState).some((name) => name.startsWith("pins.backup-")),
+  );
+  rmSync(trustCliState, { recursive: true, force: true });
+  check("trust list rejects options", !parseCliArgs(["trust", "list", "--force"]).ok);
+  check("trust forget requires a domain", !parseCliArgs(["trust", "forget"]).ok);
+  check("trust forget rejects --all", !parseCliArgs(["trust", "forget", "example.com", "--all"]).ok);
+  check("trust reset still requires --all", !parseCliArgs(["trust", "reset"]).ok);
+  check("an unknown trust subcommand is rejected", !parseCliArgs(["trust", "purge"]).ok);
+  const forgetArgs = parseCliArgs(["trust", "forget", "example.com", "--force"]);
+  check(
+    "parses trust forget with --force",
+    forgetArgs.ok &&
+      forgetArgs.command.kind === "trust_forget" &&
+      forgetArgs.command.domain === "example.com" &&
+      forgetArgs.command.force === true,
+  );
+
   const recoveryState = mkdtempSync(join(tmpdir(), "dnstall-recovery-"));
   writeFileSync(join(recoveryState, "pins.json"), "broken", "utf8");
   const recovery = spawnSync(process.execPath, [cli, "trust", "reset", "--all", "--force"], {
