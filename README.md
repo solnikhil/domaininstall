@@ -1,19 +1,18 @@
 # domaininstall
 
-Install an npm package through a domain you already recognize.
+Install an npm package using a domain you already know.
 
 ```text
 di verify zuraai.xyz
 di zuraai.xyz
 ```
 
-The idea is simple: a domain owner publishes a small DNS record that points to
-an npm package. `domaininstall` reads that record, shows you exactly what it
-found, and asks before installing anything.
+Here’s the idea: a domain owner publishes a small DNS record that points to an
+npm package. `domaininstall` reads that record, shows you exactly what it found,
+and asks before installing anything.
 
-> **Release status:** available on npm. This is still an early release, so the
-> command and DNS format are intentionally small while real-world use shapes
-> what comes next.
+> **Status:** available on npm as an early release. The command and DNS format
+> are intentionally small while real-world use shapes what comes next.
 
 ## Install
 
@@ -29,13 +28,13 @@ di verify zuraai.xyz
 
 ## Why this exists
 
-Package names are easy to mistype and unfamiliar scopes are hard to judge. A
-domain can be a more recognizable starting point: if you trust `example.com`,
+Package names are easy to mistype, and unfamiliar scopes are hard to judge. A
+domain is often a clearer starting point: if you already trust `example.com`,
 you can ask what package that domain declares instead of guessing its npm name.
 
-That is useful evidence, not a magic safety stamp. `domaininstall` proves that
-the current DNS record maps a domain to a package. It does not prove that the
-package code is safe.
+That’s useful evidence — not a magic safety stamp. `domaininstall` proves that
+the current DNS record maps a domain to a package. It does **not** prove that
+the package code is safe.
 
 ## A quick tour
 
@@ -51,18 +50,18 @@ You can inspect it without installing:
 di verify example.com
 ```
 
-When you are ready, run:
+When you’re ready:
 
 ```text
 di example.com
 ```
 
-Before the install, `di` prints the resolved package, version policy, registry,
-destination, and exact npm command. It waits for confirmation, then installs
-with lifecycle scripts disabled.
+Before anything is installed, `di` prints the resolved package, version policy,
+registry, destination, and the exact npm command it will run. It waits for your
+confirmation, then installs with lifecycle scripts disabled.
 
-To install a command-line tool for your whole machine instead of the current
-project, add `--global`:
+To install a command-line tool for your whole machine (instead of the current
+project), add `--global`:
 
 ```text
 di example.com --global
@@ -72,24 +71,24 @@ di example.com --global
 
 On first use, `domaininstall` saves the domain-to-package mapping in
 `~/.domaininstall/pins.json`. If the domain later points to a different package,
-the change is called out and cannot be accepted with `--yes`.
+you’ll see a clear warning — and you can’t wave it away with `--yes`.
 
-This is trust on first use (TOFU): it helps returning users notice a changed
-mapping. It cannot protect a first-time user from a compromised, expired, or
+This is trust on first use (TOFU). It helps returning users notice a changed
+mapping. It can’t protect a first-time user from a compromised, expired, or
 mistyped domain.
 
-The pin also records the DNS version policy and effective npm registry. A
-one-off version override on the command line does not silently replace the
-domain's policy.
+The pin also records the DNS version policy and the effective npm registry. A
+one-off version override on the command line won’t silently replace the
+domain’s policy.
 
 ## What it does not promise
 
-`domaininstall` does not prove that:
+`domaininstall` does **not** prove that:
 
-- the package is safe, audited, or malware-free;
-- you typed the intended domain on first use;
-- a newly published package version is trustworthy; or
-- the domain owner also controls the npm publisher account or source code.
+- the package is safe, audited, or free of malware
+- you typed the intended domain on first use
+- a newly published package version is trustworthy
+- the domain owner also controls the npm publisher account or source code
 
 Keep using lockfiles, registry provenance, dependency review, and security
 scanning. They solve different parts of the problem.
@@ -102,7 +101,7 @@ The basic record lives at `_dnstall.<domain>`:
 _dnstall.example.com.  TXT  "dnstall=pkg:npm/example-package"
 ```
 
-Publishers can include a version or range:
+Publishers can pin a version or range:
 
 ```dns
 _dnstall.example.com.  TXT  "dnstall=pkg:npm/example-package@^2"
@@ -114,7 +113,14 @@ A path-like sub-package becomes another DNS label:
 di example.com/react
 ```
 
-That command looks up `_dnstall.react.example.com`.
+That looks up `_dnstall.react.example.com`.
+
+## For package publishers
+
+Publishing a mapping is a DNS TXT record and a quick check with
+`di verify <your-domain>`. Step-by-step unassisted setup lives in the
+[publisher guide](docs/m4/PUBLISHER-GUIDE.md). The project is in a quiet beta —
+if you maintain an npm package and want to try a domain mapping, start there.
 
 ## Commands
 
@@ -131,7 +137,7 @@ The npm package exposes `di` as the primary command, with `domaininstall` and
 `dnstall` as aliases.
 
 Progress and previews go to standard output; warnings and errors go to standard
-error, so `di` composes with scripts and CI logs.
+error — so `di` plays nicely with scripts and CI logs.
 
 ## Requirements and current limits
 
@@ -139,24 +145,24 @@ error, so `di` composes with scripts and CI logs.
 - npm available on `PATH`
 - macOS, Linux, or Windows
 
-The first release deliberately supports npm projects only. pnpm, Yarn, and Bun
-are refused until their install behavior has been tested to the same standard.
+The first release supports **npm projects only**. pnpm, Yarn, and Bun are
+refused until their install behavior has been tested to the same standard.
 
 Every install uses the effective HTTPS npm registry explicitly and includes
 `--ignore-scripts`. If a dependency needs a lifecycle script, review that step
-and run it yourself afterward; `domaininstall` will not enable it for you.
+and run it yourself afterward — `domaininstall` won’t enable it for you.
 
-If your npm configuration routes a package's scope to a different registry than
-the default one (`@scope:registry`), `di` refuses the install instead of showing
-one registry and fetching from another. Install that package with npm directly
-until scope-specific registries are supported.
+If your npm config routes a package’s scope to a different registry than the
+default (`@scope:registry`), `di` refuses the install instead of showing one
+registry and fetching from another. Install that package with npm directly until
+scope-specific registries are supported.
 
-The trust store is schema-validated, atomic, and locked while it is being
-updated. On macOS and Linux it also enforces owner-only permissions and
-no-follow file access. Windows relies on the user-profile ACL because Node does
-not expose the same POSIX ownership and no-follow guarantees there. Corrupt
-state fails closed. Resetting trust keeps a backup and requires confirmation
-unless you intentionally add `--force`.
+The trust store is schema-validated, written atomically, and locked while it’s
+being updated. On macOS and Linux it also enforces owner-only permissions and
+no-follow file access. Windows relies on the user-profile ACL, because Node
+doesn’t expose the same POSIX ownership and no-follow guarantees there. Corrupt
+state fails closed. Resetting trust keeps a backup and asks for confirmation
+unless you intentionally pass `--force`.
 
 ## Development
 
@@ -171,14 +177,14 @@ npm run test:e2e
 npm run verify:package
 ```
 
-`npm test` uses deterministic, mocked DNS responses. The E2E command is kept
+`npm test` uses deterministic, mocked DNS responses. The E2E command is
 separate because it performs a live DNS lookup and a real npm installation.
 
 ## Security
 
-The [security policy](SECURITY.md) explains the supported threat model and how
-to report a vulnerability. The [release roadmap](ROADMAP.md) tracks ongoing
-hardening and validation work.
+The [security policy](SECURITY.md) explains what we claim, what we don’t, and
+how to report a vulnerability. The [release roadmap](ROADMAP.md) tracks
+hardening and validation work still in progress.
 
 ## License
 

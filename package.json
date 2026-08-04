@@ -25,7 +25,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli.js",
-    "test": "npm run build && node --experimental-strip-types scripts/test.ts",
+    "test": "npm run build && node --experimental-strip-types scripts/test.ts && node --experimental-strip-types scripts/test-exhaustive.ts",
+    "test:unit": "npm run build && node --experimental-strip-types scripts/test.ts",
+    "test:exhaustive": "npm run build && node --experimental-strip-types scripts/test-exhaustive.ts",
     "test:e2e": "npm run build && node --experimental-strip-types scripts/e2e.ts",
     "test:all": "npm test && npm run test:e2e",
     "verify:package": "npm run build && node --experimental-strip-types scripts/verify-package.ts",
@@ -37,9 +39,9 @@
     "package-manager",
     "npm",
     "typosquatting",
-    "provenance",
     "dnslink",
-    "supply-chain"
+    "supply-chain",
+    "tofu"
   ],
   "license": "MIT",
   "publishConfig": {

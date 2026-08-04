@@ -117,12 +117,13 @@ async function main() {
 
   console.log("\n4. TOFU pin");
   const testDomain = "smoke-test.example";
-  savePin(testDomain, {
+  const firstSave = savePin(testDomain, {
     namespace: "npm",
     package: "good-pkg",
     registry: "https://registry.npmjs.org/",
     dnsVersion: null,
   });
+  check("savePin records a first-use pin", firstSave.ok === true);
   const same = diffPin(testDomain, {
     namespace: "npm",
     package: "good-pkg",
@@ -146,6 +147,73 @@ async function main() {
   check(
     "pins DNS version policy independently",
     changedDnsVersion.changes.some((c) => c.field === "dnsVersion"),
+  );
+
+  const existingPin = getPin(testDomain)!;
+  const casSame = savePin(
+    testDomain,
+    {
+      namespace: "npm",
+      package: "good-pkg",
+      registry: "https://registry.npmjs.org/",
+      dnsVersion: null,
+    },
+    existingPin,
+  );
+  check("savePin CAS succeeds when expected pin matches", casSame.ok === true);
+
+  const casDiverge = savePin(
+    testDomain,
+    {
+      namespace: "npm",
+      package: "other-pkg",
+      registry: "https://registry.npmjs.org/",
+      dnsVersion: null,
+    },
+    // Claim we expected no pin while one exists → refuse overwrite
+  );
+  check(
+    "savePin refuses unexpected first-use when pin exists",
+    casDiverge.ok === false && casDiverge.reason === "diverged",
+  );
+  check("diverged savePin leaves package unchanged", getPin(testDomain)?.package === "good-pkg");
+
+  const invalidSave = savePin("not a domain", {
+    namespace: "npm",
+    package: "x",
+    registry: "https://registry.npmjs.org/",
+    dnsVersion: null,
+  });
+  check(
+    "savePin validates domain on write",
+    invalidSave.ok === false && invalidSave.reason === "invalid",
+  );
+
+  // Concurrent first-use of the same identity should succeed (idempotent), not diverge.
+  resetPinStore();
+  const twinDomain = "twin.example";
+  const twinInput = {
+    namespace: "npm" as const,
+    package: "same-pkg",
+    registry: "https://registry.npmjs.org/",
+    dnsVersion: null as string | null,
+  };
+  check("twin first write", savePin(twinDomain, twinInput).ok === true);
+  const twinRace = savePin(twinDomain, twinInput); // expected absent, store already has same identity
+  check(
+    "savePin is idempotent when the same identity is already present",
+    twinRace.ok === true && getPin(twinDomain)?.package === "same-pkg",
+  );
+
+  // Restore a pin for the remaining permission / corrupt-state checks below.
+  check(
+    "restore smoke-test pin after twin checks",
+    savePin(testDomain, {
+      namespace: "npm",
+      package: "good-pkg",
+      registry: "https://registry.npmjs.org/",
+      dnsVersion: null,
+    }).ok === true,
   );
 
   const isWindows = process.platform === "win32";
@@ -198,7 +266,7 @@ async function main() {
   const pinModule = new URL("../dist/pin.js", import.meta.url).href;
   const runWriter = (index: number) =>
     new Promise<number>((resolve) => {
-      const code = `import { savePin } from ${JSON.stringify(pinModule)}; savePin(${JSON.stringify(`worker-${index}.example`)}, { namespace: "npm", package: ${JSON.stringify(`pkg-${index}`)}, registry: "https://registry.npmjs.org/", dnsVersion: null });`;
+      const code = `import { savePin } from ${JSON.stringify(pinModule)}; const r = savePin(${JSON.stringify(`worker-${index}.example`)}, { namespace: "npm", package: ${JSON.stringify(`pkg-${index}`)}, registry: "https://registry.npmjs.org/", dnsVersion: null }); if (!r.ok) process.exit(2);`;
       const child = spawn(process.execPath, ["--input-type=module", "--eval", code], {
         env: { ...process.env, DOMAININSTALL_STATE_DIR: state },
         stdio: "ignore",
@@ -258,6 +326,8 @@ async function main() {
     npmScopeOf("@acme/widget") === "@acme" && npmScopeOf("widget") === null && npmScopeOf("@acme") === null,
   );
   const scopeDir = mkdtempSync(join(tmpdir(), "dnstall-scope-"));
+  // npm only loads project-level .npmrc when the directory is a package root.
+  writeFileSync(join(scopeDir, "package.json"), JSON.stringify({ name: "scope-fixture", version: "0.0.0" }));
   writeFileSync(
     join(scopeDir, ".npmrc"),
     "registry=https://packages.example.test/npm/\n@acme:registry=https://other.example.test/npm/\n",
@@ -574,6 +644,86 @@ globalThis.fetch = async () => new Response(JSON.stringify({
     "REFUSED, malformed, and timeout exhaust providers without becoming NODATA",
     exhausted.outcome === "provider_exhaustion" &&
       exhausted.attempts.map((attempt) => attempt.outcome).join(",") === "refused,malformed,timeout",
+  );
+
+  const withAd = await resolveTxt("dnstall", "ad.example", {
+    providers: ["https://resolver.example"],
+    fetchImpl: (async () =>
+      jsonResponse({
+        Status: 0,
+        AD: true,
+        Answer: [{ type: 16, name: "_dnstall.ad.example", data: '"dnstall=pkg:npm/adpkg"' }],
+      })) as typeof fetch,
+  });
+  check(
+    "propagates resolver AD bit and matching QNAME",
+    withAd.outcome === "answer" && withAd.authenticated === true && withAd.records[0] === "dnstall=pkg:npm/adpkg",
+  );
+
+  const wrongName = await resolveTxt("dnstall", "wrong.example", {
+    providers: ["https://resolver-one.example", "https://resolver-two.example"],
+    fetchImpl: (async () =>
+      jsonResponse({
+        Status: 0,
+        Answer: [{ type: 16, name: "_dnstall.other.example", data: '"dnstall=pkg:npm/evil"' }],
+      })) as typeof fetch,
+  });
+  check(
+    "wrong-name TXT answers are malformed and fall through",
+    wrongName.outcome === "provider_exhaustion" &&
+      wrongName.attempts.every((attempt) => attempt.outcome === "malformed"),
+  );
+
+  const oversized = await resolveTxt("dnstall", "huge.example", {
+    providers: ["https://resolver.example"],
+    fetchImpl: (async () =>
+      new Response("x".repeat(300_000), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch,
+  });
+  check(
+    "rejects oversized DoH bodies as malformed",
+    oversized.outcome === "provider_exhaustion" && oversized.attempts[0]?.outcome === "malformed",
+  );
+
+  const {
+    assertEffectiveRegistryUnchanged,
+    canonicalizeRegistryUrl,
+    registriesEqual,
+  } = await import("../dist/install.js");
+  const registryDir = mkdtempSync(join(tmpdir(), "dnstall-registry-recheck-"));
+  writeFileSync(join(registryDir, "package.json"), JSON.stringify({ name: "registry-fixture", version: "0.0.0" }));
+  writeFileSync(join(registryDir, ".npmrc"), "registry=https://registry.npmjs.org/\n");
+  const regAgain = assertEffectiveRegistryUnchanged("stripe", "https://registry.npmjs.org/", registryDir);
+  check(
+    "assertEffectiveRegistryUnchanged accepts stable public registry",
+    regAgain.ok === true && regAgain.registry === "https://registry.npmjs.org/",
+  );
+  const regMismatch = assertEffectiveRegistryUnchanged(
+    "stripe",
+    "https://example-registry.invalid/",
+    registryDir,
+  );
+  check(
+    "assertEffectiveRegistryUnchanged detects registry drift",
+    regMismatch.ok === false,
+  );
+  rmSync(registryDir, { recursive: true, force: true });
+  check(
+    "registry trailing-slash forms are equal",
+    registriesEqual("https://registry.npmjs.org", "https://registry.npmjs.org/") === true,
+  );
+  check(
+    "canonicalizeRegistryUrl lowercases host and adds trailing slash",
+    canonicalizeRegistryUrl("https://Registry.NPMJS.org") === "https://registry.npmjs.org/",
+  );
+  // assertEffectiveRegistryUnchanged should accept expected without trailing slash
+  // when npm returns the slash form (canonical equality).
+  const regSlash = assertEffectiveRegistryUnchanged("stripe", "https://registry.npmjs.org");
+  check(
+    "assertEffectiveRegistryUnchanged tolerates trailing-slash drift",
+    regSlash.ok === true,
   );
 
   rmSync(state, { recursive: true, force: true });
