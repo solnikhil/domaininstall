@@ -26,6 +26,18 @@ Then check a domain without installing its package:
 di verify zuraai.xyz
 ```
 
+## Development
+
+Build the CLI locally and run the test suite:
+
+```bash
+npm install
+npm test
+```
+
+The compiled CLI is written to `dist/`. To exercise the end-to-end checks as
+well, run `npm run test:all`.
+
 ## Why this exists
 
 Package names are easy to mistype, and unfamiliar scopes are hard to judge. A
