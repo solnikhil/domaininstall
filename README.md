@@ -20,6 +20,8 @@ and asks before installing anything.
 npm install --global domaininstall
 ```
 
+`domaininstall` requires Node.js 22.14.0 or newer.
+
 Then check a domain without installing its package:
 
 ```text
