@@ -25,7 +25,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli.js",
-    "test": "npm run build && node --experimental-strip-types scripts/test.ts && node --experimental-strip-types scripts/test-exhaustive.ts && node --experimental-strip-types scripts/test-claims.ts && npm run verify:docs",
+    "test": "npm run test:release-policy && npm run build && node --experimental-strip-types scripts/test.ts && node --experimental-strip-types scripts/test-exhaustive.ts && node --experimental-strip-types scripts/test-claims.ts && npm run verify:docs",
+    "test:release-policy": "node --experimental-strip-types scripts/check-release-policy.ts",
     "test:unit": "npm run build && node --experimental-strip-types scripts/test.ts",
     "test:exhaustive": "npm run build && node --experimental-strip-types scripts/test-exhaustive.ts",
     "test:claims": "npm run build && node --experimental-strip-types scripts/test-claims.ts",
