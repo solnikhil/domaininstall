@@ -13,6 +13,7 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -63,6 +64,13 @@ const FILE = join(DIR, "pins.json");
 const LOCK_FILE = join(DIR, "pins.lock");
 const STORE_VERSION = 1;
 const LOCK_WAIT_MS = 5000;
+// A lock created by older releases was visible before its metadata was
+// written. Give an in-flight legacy writer time to finish before treating an
+// unchanged malformed file as crash residue. New locks are atomically
+// published only after their metadata is durable, so they never need this
+// grace period.
+const MALFORMED_LOCK_GRACE_MS = 250;
+const LOCK_VERSION = 1;
 
 type PinStore = Record<string, Pin>;
 interface StoredPinFile {
@@ -262,41 +270,175 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
-function removeStaleLock(): boolean {
+interface LockMetadata {
+  version: typeof LOCK_VERSION;
+  pid: number;
+  token: string;
+  createdAt: string;
+}
+
+interface LockHandle {
+  release(): void;
+}
+
+interface InspectedLockMetadata {
+  pid: number;
+  current: LockMetadata | null;
+}
+
+function inspectLockMetadata(raw: string): InspectedLockMetadata | null {
+  let value: unknown;
   try {
-    const stat = lstatSync(LOCK_FILE);
-    if (stat.isSymbolicLink() || !stat.isFile()) fail(`Unsafe trust-state lock at ${LOCK_FILE}.`);
-    const raw = JSON.parse(readFileSync(LOCK_FILE, "utf8")) as unknown;
-    if (!isPlainObject(raw) || !Number.isInteger(raw.pid) || typeof raw.pid !== "number") return false;
-    if (processIsAlive(raw.pid)) return false;
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+  if (
+    !isPlainObject(value) ||
+    typeof value.pid !== "number" ||
+    !Number.isSafeInteger(value.pid) ||
+    value.pid <= 0
+  ) {
+    return null;
+  }
+
+  // A parseable PID is honored even when the rest of the metadata came from
+  // the pre-v1 protocol or is truncated. This intentionally favors waiting
+  // over stealing a lock from a process that may still be writing it.
+  if (
+    value.version !== LOCK_VERSION ||
+    typeof value.token !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.token) ||
+    !isIsoTimestamp(value.createdAt)
+  ) {
+    return { pid: value.pid, current: null };
+  }
+  return { pid: value.pid, current: value as unknown as LockMetadata };
+}
+
+function sameFile(a: { dev: number; ino: number }, b: { dev: number; ino: number }): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
+/**
+ * Remove a lock only while retaining a hard-link claim to the exact inode we
+ * inspected. This prevents a delayed cleanup/release from unlinking a newer
+ * owner's lock after the pathname has been reused.
+ */
+function unlinkClaimedLock(observedFd: number, metadata: LockMetadata | null): boolean {
+  const claim = join(DIR, `.pins-lock-claim-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    linkSync(LOCK_FILE, claim);
+    const observed = fstatSync(observedFd);
+    const claimed = lstatSync(claim);
+    if (!sameFile(observed, claimed)) return false;
+
+    const current = lstatSync(LOCK_FILE);
+    if (!sameFile(claimed, current)) return false;
     unlinkSync(LOCK_FILE);
+
+    // New-protocol owners retain their original hard link while holding the
+    // lock. Clean it after a crashed owner, but only if it is the inode claimed
+    // above; never trust metadata to select an arbitrary path.
+    if (metadata) {
+      const owner = join(DIR, `.pins-lock-${metadata.token}.owner`);
+      try {
+        if (sameFile(claimed, lstatSync(owner))) unlinkSync(owner);
+      } catch {
+        // Missing owner link is harmless: the public lock was reclaimed.
+      }
+    }
     return true;
   } catch (error) {
-    if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
     return false;
+  } finally {
+    try {
+      unlinkSync(claim);
+    } catch {
+      // The claim may not have been created.
+    }
   }
 }
 
-function withLock<T>(operation: () => T): T {
+function removeStaleLock(): boolean {
+  let fd: number | undefined;
+  try {
+    fd = openSync(LOCK_FILE, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(fd);
+    if (stat.isSymbolicLink() || !stat.isFile()) fail(`Unsafe trust-state lock at ${LOCK_FILE}.`);
+    const inspected = inspectLockMetadata(readFileSync(fd, "utf8"));
+    if (inspected && processIsAlive(inspected.pid)) return false;
+    if (!inspected?.current && Date.now() - stat.mtimeMs < MALFORMED_LOCK_GRACE_MS) {
+      return false;
+    }
+    return unlinkClaimedLock(fd, inspected?.current ?? null);
+  } catch (error) {
+    if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function acquireLock(): LockHandle {
   ensureStateDir();
   const deadline = Date.now() + LOCK_WAIT_MS;
-  let lockFd: number | undefined;
-
-  while (lockFd === undefined) {
+  while (true) {
+    const token = randomUUID();
+    const owner = join(DIR, `.pins-lock-${token}.owner`);
+    let ownerFd: number | undefined;
     try {
-      lockFd = openSync(
-        LOCK_FILE,
+      // Construct and flush the owner privately. Publishing it with link(2)
+      // is one atomic namespace operation, eliminating the empty/truncated
+      // live-lock window of open(O_EXCL) followed by write.
+      ownerFd = openSync(
+        owner,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
         0o600,
       );
-      writeFileSync(lockFd, JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }), "utf8");
-      fsyncSync(lockFd);
+      const metadata: LockMetadata = {
+        version: LOCK_VERSION,
+        pid: process.pid,
+        token,
+        createdAt: new Date().toISOString(),
+      };
+      writeFileSync(ownerFd, JSON.stringify(metadata), "utf8");
+      fsyncSync(ownerFd);
+      linkSync(owner, LOCK_FILE);
+
+      let released = false;
+      const heldFd = ownerFd;
+      ownerFd = undefined;
+      return {
+        release(): void {
+          if (released) return;
+          released = true;
+          try {
+            const held = fstatSync(heldFd);
+            try {
+              const current = lstatSync(LOCK_FILE);
+              if (sameFile(held, current)) unlinkSync(LOCK_FILE);
+            } catch {
+              // Missing/replaced public lock: do not touch the replacement.
+            }
+          } finally {
+            closeSync(heldFd);
+            try {
+              unlinkSync(owner);
+            } catch {
+              // The private owner link may already have been reclaimed.
+            }
+          }
+        },
+      };
     } catch (error) {
-      if (lockFd !== undefined) {
-        closeSync(lockFd);
-        lockFd = undefined;
-        if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
-        throw error;
+      if (ownerFd !== undefined) closeSync(ownerFd);
+      try {
+        unlinkSync(owner);
+      } catch {
+        // Owner may not have been created.
       }
       if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
       if (removeStaleLock()) continue;
@@ -306,12 +448,14 @@ function withLock<T>(operation: () => T): T {
       Atomics.wait(sleeper, 0, 0, 25);
     }
   }
+}
 
+function withLock<T>(operation: () => T): T {
+  const lock = acquireLock();
   try {
     return operation();
   } finally {
-    closeSync(lockFd);
-    if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
+    lock.release();
   }
 }
 
@@ -402,6 +546,17 @@ export type SavePinInput = {
 export type SavePinResult =
   | { ok: true }
   | { ok: false; reason: "diverged" | "invalid"; message: string; changes?: PinChange[] };
+
+export interface PinCommitReservation {
+  /** Persist the validated pin while the reservation still owns the writer lock. */
+  commit(): SavePinResult;
+  /** Release without changing trust state (for example, after npm fails). */
+  release(): void;
+}
+
+export type ReservePinCommitResult =
+  | { ok: true; reservation: PinCommitReservation }
+  | Exclude<SavePinResult, { ok: true }>;
 
 type PinIdentity = {
   namespace: string;
@@ -509,12 +664,33 @@ export function savePin(
   next: SavePinInput,
   expectedExisting?: Pin | undefined,
 ): SavePinResult {
-  return withLock(() => {
-    const validated = validateSavePinInput(domain, next);
-    if (!validated.ok) {
-      return { ok: false, reason: "invalid", message: validated.message };
-    }
+  const reserved = reservePinCommit(domain, next, expectedExisting);
+  if (!reserved.ok) return reserved;
+  try {
+    return reserved.reservation.commit();
+  } finally {
+    reserved.reservation.release();
+  }
+}
 
+/**
+ * Validate and reserve a trust-state transaction before an external install
+ * mutates the project. The writer lock remains held until commit/release, so a
+ * successful npm run cannot later lose its continuity update to another
+ * domaininstall writer or to pre-existing crash residue.
+ */
+export function reservePinCommit(
+  domain: string,
+  next: SavePinInput,
+  expectedExisting?: Pin | undefined,
+): ReservePinCommitResult {
+  const validated = validateSavePinInput(domain, next);
+  if (!validated.ok) {
+    return { ok: false, reason: "invalid", message: validated.message };
+  }
+
+  const lock = acquireLock();
+  try {
     const store = load();
     const current = store[validated.domain];
 
@@ -529,43 +705,61 @@ export function savePin(
       // the identity we intended. Treat as success (refresh lastSeen) instead of
       // failing a completed install over a race on an identical pin.
       if (expectedAbsent && current !== undefined && pinIdentityEqual(current, validated.next)) {
-        const now = new Date().toISOString();
-        store[validated.domain] = {
-          ...validated.next,
-          firstSeen: current.firstSeen,
-          lastSeen: now,
+        // The identical first-use race is safe, but defer its lastSeen refresh
+        // until commit just like every other reserved transaction.
+      } else {
+        const changes =
+          current !== undefined && expectedExisting !== undefined
+            ? identityChanges(expectedExisting, current)
+            : current !== undefined
+              ? identityChanges(current, validated.next)
+              : undefined;
+        lock.release();
+        return {
+          ok: false,
+          reason: "diverged",
+          message: expectedAbsent
+            ? `Trust pin for ${validated.domain} appeared while confirming; store was not updated.`
+            : current === undefined
+              ? `Trust pin for ${validated.domain} was removed while confirming; store was not updated.`
+              : `Trust pin for ${validated.domain} changed while confirming; store was not updated.`,
+          ...(changes !== undefined && changes.length > 0 ? { changes } : {}),
         };
-        writeAtomically(store);
-        return { ok: true };
       }
-
-      const changes =
-        current !== undefined && expectedExisting !== undefined
-          ? identityChanges(expectedExisting, current)
-          : current !== undefined
-            ? identityChanges(current, validated.next)
-            : undefined;
-      return {
-        ok: false,
-        reason: "diverged",
-        message: expectedAbsent
-          ? `Trust pin for ${validated.domain} appeared while confirming; store was not updated.`
-          : current === undefined
-            ? `Trust pin for ${validated.domain} was removed while confirming; store was not updated.`
-            : `Trust pin for ${validated.domain} changed while confirming; store was not updated.`,
-        ...(changes !== undefined && changes.length > 0 ? { changes } : {}),
-      };
     }
 
-    const now = new Date().toISOString();
-    store[validated.domain] = {
-      ...validated.next,
-      firstSeen: current?.firstSeen ?? now,
-      lastSeen: now,
+    let finished = false;
+    let committed = false;
+    const release = (): void => {
+      if (finished) return;
+      finished = true;
+      lock.release();
     };
-    writeAtomically(store);
-    return { ok: true };
-  });
+
+    return {
+      ok: true,
+      reservation: {
+        commit(): SavePinResult {
+          if (finished || committed) {
+            throw new PinStoreError("Trust-pin transaction is no longer active.");
+          }
+          const now = new Date().toISOString();
+          store[validated.domain] = {
+            ...validated.next,
+            firstSeen: current?.firstSeen ?? now,
+            lastSeen: now,
+          };
+          writeAtomically(store);
+          committed = true;
+          return { ok: true };
+        },
+        release,
+      },
+    };
+  } catch (error) {
+    lock.release();
+    throw error;
+  }
 }
 
 /** Preserve the old file as a backup, then create a valid empty v1 store. */

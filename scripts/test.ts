@@ -13,6 +13,8 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,7 +52,7 @@ function check(name: string, cond: boolean): void {
 async function main() {
   const state = mkdtempSync(join(tmpdir(), "dnstall-state-"));
   process.env.DOMAININSTALL_STATE_DIR = state;
-  const { diffPin, getPin, resetPinStore, savePin } = await import("../dist/pin.js");
+  const { diffPin, getPin, reservePinCommit, resetPinStore, savePin } = await import("../dist/pin.js");
 
   console.log("\n1. Record parsing (purl + legacy)");
   const p1 = parseRecord("dnstall=pkg:npm/stripe");
@@ -448,6 +450,140 @@ process.stdout.write(JSON.stringify({ removed: removed ?? null, current: getPin(
     "atomic writes leave no temporary or lock files",
     !readdirSync(state).some((name) => name.endsWith(".tmp") || name === "pins.lock"),
   );
+
+  console.log("\n4c. Crash-safe trust lock recovery");
+  const lockFile = join(state, "pins.lock");
+  const ageLock = (): void => {
+    const old = new Date(Date.now() - 2000);
+    utimesSync(lockFile, old, old);
+  };
+  for (const [label, residue] of [
+    ["empty", ""],
+    ["truncated", '{"version":1,"pid":'],
+    ["malformed", '{"pid":"not-a-process"}'],
+  ] as const) {
+    writeFileSync(lockFile, residue, "utf8");
+    ageLock();
+    const recovered = savePin(`${label}-lock.example`, {
+      namespace: "npm",
+      package: `${label}-lock-pkg`,
+      registry: "https://registry.npmjs.org/",
+      dnsVersion: null,
+    });
+    check(
+      `recovers an orphaned ${label} lock`,
+      recovered.ok && getPin(`${label}-lock.example`)?.package === `${label}-lock-pkg` && !existsSync(lockFile),
+    );
+  }
+
+  writeFileSync(lockFile, "not-json", "utf8");
+  ageLock();
+  const recoveredReset = resetPinStore();
+  check(
+    "trust reset recovers malformed lock crash residue",
+    (recoveredReset === null || existsSync(recoveredReset)) && !existsSync(lockFile),
+  );
+
+  const held = reservePinCommit(
+    "held-lock.example",
+    {
+      namespace: "npm",
+      package: "held-lock-pkg",
+      registry: "https://registry.npmjs.org/",
+      dnsVersion: null,
+    },
+  );
+  if (!held.ok) throw new Error(held.message);
+  const heldLockBody = readFileSync(lockFile, "utf8");
+  let waitingWriterClosed = false;
+  const waitingWriter = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { savePin } from ${JSON.stringify(pinModule)};
+const saved = savePin("waiting-writer.example", { namespace: "npm", package: "waiting-writer", registry: "https://registry.npmjs.org/", dnsVersion: null });
+if (!saved.ok) process.exit(2);`,
+    ],
+    { env: { ...process.env, DOMAININSTALL_STATE_DIR: state }, stdio: "ignore" },
+  );
+  waitingWriter.on("close", () => {
+    waitingWriterClosed = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  check(
+    "a live lock is not stolen",
+    !waitingWriterClosed && readFileSync(lockFile, "utf8") === heldLockBody,
+  );
+  const waitingExit = await new Promise<number>((resolve) => {
+    waitingWriter.on("close", (code) => resolve(code ?? 1));
+    held.reservation.release();
+  });
+  check("a waiting writer proceeds after live-lock release", waitingExit === 0);
+
+  const exact = reservePinCommit("exact-release.example", {
+    namespace: "npm",
+    package: "exact-release",
+    registry: "https://registry.npmjs.org/",
+    dnsVersion: null,
+  });
+  if (!exact.ok) throw new Error(exact.message);
+  unlinkSync(lockFile);
+  const replacement = JSON.stringify({
+    version: 1,
+    pid: process.pid,
+    token: "00000000-0000-4000-8000-000000000019",
+    createdAt: new Date().toISOString(),
+  });
+  writeFileSync(lockFile, replacement, "utf8");
+  exact.reservation.release();
+  check(
+    "release does not unlink a replacement lock instance",
+    existsSync(lockFile) && readFileSync(lockFile, "utf8") === replacement,
+  );
+  unlinkSync(lockFile);
+
+  const killedState = mkdtempSync(join(tmpdir(), "dnstall-killed-lock-"));
+  const killedOwner = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { reservePinCommit } from ${JSON.stringify(pinModule)};
+const held = reservePinCommit("killed-owner.example", { namespace: "npm", package: "killed-owner", registry: "https://registry.npmjs.org/", dnsVersion: null });
+if (!held.ok) process.exit(2);
+process.stdout.write("READY\\n");
+setInterval(() => {}, 1000);`,
+    ],
+    { env: { ...process.env, DOMAININSTALL_STATE_DIR: killedState }, stdio: ["ignore", "pipe", "inherit"] },
+  );
+  await new Promise<void>((resolve, reject) => {
+    killedOwner.stdout!.on("data", (chunk: Buffer) => {
+      if (chunk.toString().includes("READY")) resolve();
+    });
+    killedOwner.on("error", reject);
+    killedOwner.on("close", (code) => {
+      if (code !== null) reject(new Error(`lock owner exited before ready (${code})`));
+    });
+  });
+  killedOwner.kill("SIGKILL");
+  await new Promise<void>((resolve) => killedOwner.on("close", () => resolve()));
+  const killedRecovery = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { savePin } from ${JSON.stringify(pinModule)};
+const saved = savePin("after-kill.example", { namespace: "npm", package: "after-kill", registry: "https://registry.npmjs.org/", dnsVersion: null });
+if (!saved.ok) process.exit(2);`,
+    ],
+    { env: { ...process.env, DOMAININSTALL_STATE_DIR: killedState }, stdio: "ignore" },
+  );
+  check(
+    "reclaims a valid lock after its owner is killed",
+    killedRecovery.status === 0 && !existsSync(join(killedState, "pins.lock")),
+  );
+  rmSync(killedState, { recursive: true, force: true });
 
   console.log("\n5. Package-manager detection + plan");
   const plan = buildInstallPlan("stripe", "^18", "https://registry.npmjs.org/");

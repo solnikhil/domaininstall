@@ -31,6 +31,11 @@ when that happens.
 ### Changed
 
 - `--force` now applies to both `trust forget` and `trust reset`.
+- Trust-store writers now publish fully durable lock metadata atomically,
+  recover empty, truncated, malformed, and dead-process lock residue, and only
+  release the exact lock instance they acquired.
+- Installs reserve the trust-pin transaction before npm is allowed to mutate the
+  project, then commit the pin under that same reservation after npm succeeds.
 
 ## [0.0.3] - 2026-07-27
 

@@ -24,9 +24,9 @@ import { buildSetupPlan } from "./setup.js";
 import {
   diffPin,
   forgetPin,
-  savePin,
   getPin,
   listPins,
+  reservePinCommit,
   resetPinStore,
   PIN_FILE,
   type PinChange,
@@ -298,29 +298,41 @@ async function cmdInstall(target: string, opts: { yes: boolean; global: boolean 
     return 1;
   }
 
-  const code = await runInstall(plan);
-  if (code === 0) {
-    // CAS under lock: refuse to overwrite if another process changed the pin mid-install.
-    const saved = savePin(r.domain, pinNext, existing);
-    if (!saved.ok) {
-      error(saved.message);
-      if (saved.changes && saved.changes.length > 0) {
-        for (const ch of saved.changes) {
-          detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
-        }
+  // Reserve the pin transaction before npm can mutate the project. The lock
+  // remains held through npm, so a successful install always has an exclusive,
+  // preflighted path to its continuity commit.
+  const reserved = reservePinCommit(r.domain, pinNext, existing);
+  if (!reserved.ok) {
+    error(reserved.message);
+    if (reserved.changes && reserved.changes.length > 0) {
+      for (const ch of reserved.changes) {
+        detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
       }
-      detail(
-        ce.dim(
-          `  ${plan.spec} was installed, but the trust pin was not updated. Run di verify ${r.domain}.`,
-        ),
-      );
-      return 1;
     }
-    success(`Installed ${plan.spec} from ${r.domain}`);
-  } else {
-    error(`Install failed (${plan.pm} exited with code ${code}).`);
+    return 1;
   }
-  return code;
+
+  try {
+    const code = await runInstall(plan);
+    if (code === 0) {
+      const saved = reserved.reservation.commit();
+      if (!saved.ok) {
+        error(saved.message);
+        if (saved.changes && saved.changes.length > 0) {
+          for (const ch of saved.changes) {
+            detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
+          }
+        }
+        return 1;
+      }
+      success(`Installed ${plan.spec} from ${r.domain}`);
+    } else {
+      error(`Install failed (${plan.pm} exited with code ${code}).`);
+    }
+    return code;
+  } finally {
+    reserved.reservation.release();
+  }
 }
 
 async function cmdVerify(target: string): Promise<number> {
