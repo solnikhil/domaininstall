@@ -142,10 +142,11 @@ DNS is eventually consistent. Many providers update in under a minute; some
 take the full TTL. If verify fails immediately after save, wait a few minutes
 and try again before changing anything else.
 
-### 6. Install the CLI and verify
+### 6. Generate the record and verify
 
 ```bash
 npm install --global domaininstall
+di setup <domain> <package>[@range]
 di verify <domain>
 ```
 
@@ -153,10 +154,13 @@ Example with the live reference:
 
 ```bash
 npm install --global domaininstall
+di setup zuraai.xyz zuraai
 di verify zuraai.xyz
 ```
 
-There is no `di setup` command yet. Creating the record is a manual DNS step.
+`di setup` prints the exact relative record name and TXT value to enter at the
+DNS provider. It does not change DNS or contact the provider. The manual fields
+above remain the source of truth when evaluating provider-specific UI.
 
 ## Success criteria
 
