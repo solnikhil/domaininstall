@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import type { Harness, TestModule } from "./harness.ts";
@@ -22,7 +23,10 @@ function run(h: Harness): void {
   const fakeBin = join(root, "bin");
   mkdirSync(fakeBin);
 
+  const fakeArtifactBytes = "deterministic CLI fixture tarball";
+  const fakeArtifactIntegrity = `sha512-${createHash("sha512").update(fakeArtifactBytes).digest("base64")}`;
   const fakeNpmBody = `const fs = require("node:fs");
+const path = require("node:path");
 if (process.argv.includes("config") && process.argv.includes("get")) {
   const key = process.argv[process.argv.indexOf("get") + 1];
   if (key === "registry" || (key && key.endsWith(":registry"))) {
@@ -36,6 +40,41 @@ if (process.argv.includes("config") && process.argv.includes("get")) {
   process.stdout.write("undefined\\n");
   process.exit(0);
 }
+if (process.argv[2] === "view") {
+  const counterPath = process.env.DOMAININSTALL_METADATA_COUNTER;
+  let count = 0;
+  if (counterPath) {
+    try { count = Number(fs.readFileSync(counterPath, "utf8")); } catch {}
+    fs.writeFileSync(counterPath, String(count + 1));
+  }
+  const integrity = process.env.DOMAININSTALL_MUTATE_METADATA_AFTER_FIRST === "1" && count > 0
+    ? "sha512-${Buffer.alloc(64, 9).toString("base64")}"
+    : ${JSON.stringify(fakeArtifactIntegrity)};
+  const viewedSpec = process.argv[3] || "";
+  if (viewedSpec.includes("@^") || viewedSpec.includes("@*")) {
+    process.stdout.write(JSON.stringify([
+      { version: "2.3.0", "dist.integrity": integrity, "dist.tarball": "https://registry.npmjs.org/safe-package/-/safe-package-2.3.0.tgz" },
+      { version: "2.4.1", "dist.integrity": integrity, "dist.tarball": "https://registry.npmjs.org/safe-package/-/safe-package-2.4.1.tgz" }
+    ]));
+    process.exit(0);
+  }
+  process.stdout.write(JSON.stringify({ version: "2.4.1", "dist.integrity": integrity, "dist.tarball": "https://registry.npmjs.org/safe-package/-/safe-package-2.4.1.tgz" }));
+  process.exit(0);
+}
+if (process.argv[2] === "pack") {
+  if (process.env.DOMAININSTALL_PACK_REQUEST_LOG) {
+    fs.appendFileSync(process.env.DOMAININSTALL_PACK_REQUEST_LOG, (process.argv[3] || "") + "\\n");
+  }
+  const outputArg = process.argv.find((arg) => arg.startsWith("--pack-destination="));
+  const output = outputArg.slice("--pack-destination=".length);
+  fs.writeFileSync(path.join(output, "safe-package-2.4.1.tgz"), ${JSON.stringify(fakeArtifactBytes)});
+  process.stdout.write(JSON.stringify([{
+    name: "safe-package", version: "2.4.1", integrity: ${JSON.stringify(fakeArtifactIntegrity)},
+    filename: "safe-package-2.4.1.tgz"
+  }]));
+  process.exit(0);
+}
+if (process.argv[2] === "cache") process.exit(0);
 fs.appendFileSync(process.env.DOMAININSTALL_TEST_MARKER || "", (process.argv.slice(2).join(" ")) + "\\n");
 process.exit(0);
 `;
@@ -174,17 +213,69 @@ globalThis.fetch = async () => {
     "install --yes first-use runs npm install",
     install.status === 0 && existsSync(marker),
   );
+  h.check(
+    "preview exposes exact version, full SRI, and canonical tarball",
+    install.stdout.includes("2.4.1") &&
+      install.stdout.includes(fakeArtifactIntegrity) &&
+      install.stdout.includes("safe-package-2.4.1.tgz"),
+  );
+  const installArgv = existsSync(marker) ? readFileSync(marker, "utf8") : "";
+  h.check(
+    "npm handoff is exact and never uses a range or local file dependency",
+    installArgv.includes("safe-package@2.4.1") &&
+      installArgv.includes("--save-exact") &&
+      !installArgv.includes("safe-package@^2") &&
+      !installArgv.includes("file:"),
+  );
   if (existsSync(join(installState, "pins.json"))) {
     const pins = JSON.parse(readFileSync(join(installState, "pins.json"), "utf8")) as {
-      pins: Record<string, { package: string }>;
+      version: number;
+      pins: Record<string, { package: string; resolvedVersion: string; integrity: string; tarball: string }>;
     };
     h.check(
-      "install writes TOFU pin for domain",
-      pins.pins["example.com"]?.package === "safe-package",
+      "install writes v2 artifact identity pin for domain",
+      pins.version === 2 &&
+        pins.pins["example.com"]?.package === "safe-package" &&
+        pins.pins["example.com"]?.resolvedVersion === "2.4.1" &&
+        pins.pins["example.com"]?.integrity === fakeArtifactIntegrity &&
+        pins.pins["example.com"]?.tarball.endsWith("safe-package-2.4.1.tgz"),
     );
   } else {
     h.check("install writes TOFU pin for domain", false, "pins.json missing");
   }
+
+  // npm view returns an array for ranges with several matching releases. The
+  // install path must ask npm pack to select once, then view only that exact
+  // version. This fake would return the real multi-release shape if the range
+  // were incorrectly handed to npm view.
+  if (existsSync(marker)) rmSync(marker);
+  const packRequestLog = join(root, "pack-request-log");
+  const rangeInstall = spawnSync(
+    process.execPath,
+    ["--import", mockDnsUrl, cli, "example.com@^2", "--yes"],
+    {
+      encoding: "utf8",
+      cwd: project,
+      env: {
+        ...process.env,
+        ...(process.platform === "win32" ? { Path: gatePath, PATH: gatePath } : { PATH: gatePath }),
+        npm_execpath: "",
+        DOMAININSTALL_TEST_MARKER: marker,
+        DOMAININSTALL_STATE_DIR: join(root, "range-state"),
+        DOMAININSTALL_TEST_DNS_MODE: "single",
+        DOMAININSTALL_PACK_REQUEST_LOG: packRequestLog,
+      },
+    },
+  );
+  h.check(
+    "multi-release range resolves through npm pack to one exact version",
+    rangeInstall.status === 0 &&
+      existsSync(packRequestLog) &&
+      existsSync(marker) &&
+      readFileSync(packRequestLog, "utf8").trim() === "safe-package@^2" &&
+      readFileSync(marker, "utf8").includes("safe-package@2.4.1") &&
+      rangeInstall.stdout.includes("2.4.1"),
+  );
 
   // second install same mapping ok
   if (existsSync(marker)) rmSync(marker);
@@ -205,6 +296,84 @@ globalThis.fetch = async () => {
     },
   );
   h.check("install second time with same pin succeeds", install2.status === 0);
+
+  // Registry metadata is re-fetched after confirmation. Any exact artifact
+  // change between preview and handoff must stop before npm install.
+  if (existsSync(marker)) rmSync(marker);
+  const metadataCounter = join(root, "metadata-counter");
+  const metadataToctou = spawnSync(
+    process.execPath,
+    ["--import", mockDnsUrl, cli, "example.com", "--yes"],
+    {
+      encoding: "utf8",
+      cwd: project,
+      env: {
+        ...process.env,
+        ...(process.platform === "win32" ? { Path: gatePath, PATH: gatePath } : { PATH: gatePath }),
+        npm_execpath: "",
+        DOMAININSTALL_TEST_MARKER: marker,
+        DOMAININSTALL_STATE_DIR: join(root, "metadata-toctou-state"),
+        DOMAININSTALL_TEST_DNS_MODE: "single",
+        DOMAININSTALL_METADATA_COUNTER: metadataCounter,
+        DOMAININSTALL_MUTATE_METADATA_AFTER_FIRST: "1",
+      },
+    },
+  );
+  h.check(
+    "post-confirmation registry metadata mutation fails before install",
+    metadataToctou.status === 1 &&
+      metadataToctou.stderr.includes("changed after confirmation") &&
+      !existsSync(marker),
+  );
+
+  const changeState = join(root, "artifact-change-state");
+  mkdirSync(changeState);
+  const pinTime = "2026-08-01T00:00:00.000Z";
+  writeFileSync(join(changeState, "pins.json"), JSON.stringify({ version: 2, pins: {
+    "example.com": {
+      namespace: "npm", package: "safe-package", registry: "https://registry.npmjs.org/", dnsVersion: null,
+      resolvedVersion: "2.3.0", integrity: `sha512-${Buffer.alloc(64, 3).toString("base64")}`,
+      tarball: "https://registry.npmjs.org/safe-package/-/safe-package-2.3.0.tgz", resolvedAt: pinTime,
+      firstSeen: pinTime, lastSeen: pinTime,
+    },
+  } }), "utf8");
+  const exactVersionChange = spawnSync(process.execPath, ["--import", mockDnsUrl, cli, "example.com", "--yes"], {
+    encoding: "utf8", cwd: project,
+    env: {
+      ...process.env,
+      ...(process.platform === "win32" ? { Path: gatePath, PATH: gatePath } : { PATH: gatePath }),
+      npm_execpath: "", DOMAININSTALL_TEST_MARKER: marker, DOMAININSTALL_STATE_DIR: changeState,
+      DOMAININSTALL_TEST_DNS_MODE: "single",
+    },
+  });
+  h.check(
+    "--yes cannot bypass an exact-version artifact change",
+    exactVersionChange.status === 130 && exactVersionChange.stderr.includes("Ignoring --yes") && !existsSync(marker),
+  );
+
+  const mutationState = join(root, "same-version-mutation-state");
+  mkdirSync(mutationState);
+  writeFileSync(join(mutationState, "pins.json"), JSON.stringify({ version: 2, pins: {
+    "example.com": {
+      namespace: "npm", package: "safe-package", registry: "https://registry.npmjs.org/", dnsVersion: null,
+      resolvedVersion: "2.4.1", integrity: `sha512-${Buffer.alloc(64, 4).toString("base64")}`,
+      tarball: "https://registry.npmjs.org/safe-package/-/safe-package-2.4.1.tgz", resolvedAt: pinTime,
+      firstSeen: pinTime, lastSeen: pinTime,
+    },
+  } }), "utf8");
+  const sameVersionMutation = spawnSync(process.execPath, ["--import", mockDnsUrl, cli, "example.com", "--yes"], {
+    encoding: "utf8", cwd: project,
+    env: {
+      ...process.env,
+      ...(process.platform === "win32" ? { Path: gatePath, PATH: gatePath } : { PATH: gatePath }),
+      npm_execpath: "", DOMAININSTALL_TEST_MARKER: marker, DOMAININSTALL_STATE_DIR: mutationState,
+      DOMAININSTALL_TEST_DNS_MODE: "single",
+    },
+  });
+  h.check(
+    "same-version SRI mutation fails closed without a confirmation path",
+    sameVersionMutation.status === 1 && sameVersionMutation.stderr.includes("never confirmable") && !existsSync(marker),
+  );
 
   // install without --yes on non-tty should refuse
   if (existsSync(marker)) rmSync(marker);

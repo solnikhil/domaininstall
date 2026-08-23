@@ -56,9 +56,11 @@ When you’re ready:
 di example.com
 ```
 
-Before anything is installed, `di` prints the resolved package, version policy,
-registry, destination, and the exact npm command it will run. It waits for your
-confirmation, then installs with lifecycle scripts disabled.
+Before anything is installed, `di` resolves the policy to one exact npm version,
+downloads the root tarball, verifies its registry SRI, and prints the exact
+version, full integrity, canonical tarball URL, registry, destination, and npm
+command. It waits for your confirmation, rechecks the exact registry metadata,
+then installs with lifecycle scripts disabled.
 
 To install a command-line tool for your whole machine (instead of the current
 project), add `--global`:
@@ -77,9 +79,16 @@ This is trust on first use (TOFU). It helps returning users notice a changed
 mapping. It can’t protect a first-time user from a compromised, expired, or
 mistyped domain.
 
-The pin also records the DNS version policy and the effective npm registry. A
-one-off version override on the command line won’t silently replace the
-domain’s policy.
+The v2 pin also records the DNS version policy, effective npm registry, exact
+resolved version, SRI, canonical tarball URL, and resolution time. Existing v1
+pins migrate with the artifact fields explicitly set to `null`: unknown stays
+unknown, and integrity is never invented after the fact. The first artifact
+review after that migration is interactive.
+
+A one-off version override on the command line won’t silently replace the
+domain’s policy. Any known exact-version change requires manual confirmation,
+even with `--yes`. An integrity or tarball change at an already pinned exact
+version fails closed with no confirmation override.
 
 `di trust list` shows what is remembered, and `di trust forget <domain>` removes
 a single mapping without disturbing the others. Both confirm before changing
@@ -94,6 +103,7 @@ use again.
 - you typed the intended domain on first use
 - a newly published package version is trustworthy
 - the domain owner also controls the npm publisher account or source code
+- transitive dependencies have the same artifact continuity guarantee
 
 Keep using lockfiles, registry provenance, dependency review, and security
 scanning. They solve different parts of the problem.
@@ -176,14 +186,34 @@ error — so `di` plays nicely with scripts and CI logs.
 The first release supports **npm projects only**. pnpm, Yarn, and Bun are
 refused until their install behavior has been tested to the same standard.
 
-Every install uses the effective HTTPS npm registry explicitly and includes
-`--ignore-scripts`. If a dependency needs a lifecycle script, review that step
+Every install uses the effective HTTPS npm registry explicitly, saves the root
+dependency as an exact registry version, and includes `--ignore-scripts`.
+`domaininstall` uses a private temporary npm cache containing the freshly
+rechecked packument and independently SRI-verified root tarball; npm may still
+fetch missing transitive dependencies. Temporary artifact state is removed
+after the handoff. If a dependency needs a lifecycle script, review that step
 and run it yourself afterward — `domaininstall` won’t enable it for you.
+
+npm does not expose a supported `install --integrity=<SRI>` or install-from-file
+descriptor interface. The final handoff therefore relies on npm honoring its
+fresh isolated cache under `--prefer-offline` and enforcing the cached root SRI;
+it is not a proof that npm consumed the same filesystem pathname that
+`domaininstall` hashed. The exact selector prevents range drift, and any root
+bytes npm obtains under that cached metadata must satisfy the confirmed SRI,
+but npm may make network requests for cache misses (especially transitive
+dependencies).
 
 If your npm config routes a package’s scope to a different registry than the
 default (`@scope:registry`), `di` refuses the install instead of showing one
 registry and fetching from another. Install that package with npm directly until
 scope-specific registries are supported.
+
+Artifact pinning currently requires the registry to publish a credential-free
+HTTPS tarball URL and an SRI using SHA-256, SHA-384, or SHA-512. Registries that
+expose credentials, signed query parameters, HTTP tarballs, or only legacy hash
+formats are refused. npm itself performs authenticated metadata and archive
+fetches, so ordinary npm authentication remains available without placing
+credentials in the persisted pin.
 
 The trust store is schema-validated, written atomically, and locked while it’s
 being updated. On macOS and Linux it also enforces owner-only permissions and

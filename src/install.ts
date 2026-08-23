@@ -1,8 +1,19 @@
 /** Safe npm-only package-manager handoff for the current alpha. */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { delimiter, dirname, join } from "node:path";
+import { createHash, timingSafeEqual } from "node:crypto";
+import {
+  chmodSync,
+  createReadStream,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { sanitizeTerminalText } from "./terminal.js";
 
 const NON_NPM_LOCKFILES = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"] as const;
@@ -318,22 +329,381 @@ export interface InstallPlan {
   spec: string;
   registry: string;
   global: boolean;
+  artifact: PreparedNpmArtifact;
   argv: string[];
   display: string;
 }
 
 export function buildInstallPlan(
   pkg: string,
-  version: string | undefined,
+  artifact: PreparedNpmArtifact,
   registry: string,
   options: { global?: boolean } = {},
 ): InstallPlan {
-  const spec = version ? `${pkg}@${version}` : pkg;
+  const spec = `${pkg}@${artifact.version}`;
   const global = options.global === true;
   const argv = ["install", "--ignore-scripts"];
   if (global) argv.push("--global");
-  argv.push(`--registry=${registry}`, spec);
-  return { pm: "npm", spec, registry, global, argv, display: `npm ${argv.join(" ")}` };
+  // `--prefer-offline` is deliberate: the isolated cache contains a fresh,
+  // post-confirmation packument plus the SRI-verified root tarball. npm can
+  // still fetch missing transitive dependencies, but it cannot float the root
+  // selector or substitute different root bytes without an integrity failure.
+  argv.push(
+    "--save-exact",
+    "--prefer-offline",
+    `--cache=${artifact.cacheDir}`,
+    `--registry=${registry}`,
+    spec,
+  );
+  const visible = ["install", "--ignore-scripts"];
+  if (global) visible.push("--global");
+  visible.push("--save-exact", `--registry=${registry}`, spec);
+  return {
+    pm: "npm",
+    spec,
+    registry,
+    global,
+    artifact,
+    argv,
+    display: `npm ${visible.join(" ")}`,
+  };
+}
+
+const MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024;
+const EXACT_VERSION =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const SRI_STRENGTH = { sha256: 1, sha384: 2, sha512: 3 } as const;
+type SupportedSriAlgorithm = keyof typeof SRI_STRENGTH;
+
+export interface NpmArtifactIdentity {
+  version: string;
+  integrity: string;
+  tarball: string;
+}
+
+export interface PreparedNpmArtifact extends NpmArtifactIdentity {
+  resolvedAt: string;
+  tarballPath: string;
+  cacheDir: string;
+  tempDir: string;
+}
+
+export type PrepareArtifactResult =
+  | { ok: true; artifact: PreparedNpmArtifact }
+  | { ok: false; error: string };
+
+export type ArtifactMetadataResult =
+  | { ok: true; artifact: NpmArtifactIdentity }
+  | { ok: false; error: string };
+
+function runNpmCapture(args: string[], cwd: string, timeout: number): NpmConfigResult {
+  const launcher = npmLauncher();
+  if (!launcher.ok) return { ok: false, error: launcher.error };
+  const result = spawnSync(launcher.launcher.command, [...launcher.launcher.prefixArgs, ...args], {
+    cwd,
+    encoding: "utf8",
+    shell: false,
+    timeout,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  if (result.error) return { ok: false, error: result.error.message };
+  if (result.status !== 0) {
+    const detail =
+      typeof result.stderr === "string"
+        ? sanitizeTerminalText(result.stderr.trim().slice(0, 4096))
+        : "";
+    return { ok: false, error: detail || `npm exited with code ${result.status ?? "unknown"}.` };
+  }
+  if (typeof result.stdout !== "string") return { ok: false, error: "npm returned no output." };
+  return { ok: true, value: result.stdout };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Canonical HTTPS identity for a registry-provided tarball URL. */
+export function canonicalizeTarballUrl(raw: string): string | null {
+  if (raw.length === 0 || raw.length > 8192) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (
+    url.protocol !== "https:" ||
+    !url.hostname ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    return null;
+  }
+  url.hostname = url.hostname.toLowerCase();
+  return url.href;
+}
+
+/** Strictly parse the three fields npm selected from a registry packument. */
+export function parseNpmArtifactMetadata(stdout: string): ArtifactMetadataResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(stdout) as unknown;
+  } catch {
+    return { ok: false, error: "npm returned malformed JSON while resolving the package artifact." };
+  }
+  if (!isPlainObject(value)) {
+    return { ok: false, error: "npm returned an ambiguous artifact selection instead of one exact version." };
+  }
+  const version = value.version;
+  const integrity = value["dist.integrity"];
+  const rawTarball = value["dist.tarball"];
+  if (typeof version !== "string" || !EXACT_VERSION.test(version)) {
+    return { ok: false, error: "The registry did not resolve the requested policy to one valid exact version." };
+  }
+  if (typeof integrity !== "string" || parseSri(integrity).length === 0) {
+    return { ok: false, error: `The registry returned no supported SRI for ${version}.` };
+  }
+  if (typeof rawTarball !== "string") {
+    return { ok: false, error: `The registry returned no tarball URL for ${version}.` };
+  }
+  const tarball = canonicalizeTarballUrl(rawTarball);
+  if (!tarball) {
+    return { ok: false, error: `The registry returned an unsafe tarball URL for ${version}.` };
+  }
+  return {
+    ok: true,
+    artifact: { version, integrity, tarball },
+  };
+}
+
+interface SriDigest {
+  algorithm: SupportedSriAlgorithm;
+  digest: Buffer;
+}
+
+function parseSri(value: string): SriDigest[] {
+  const parsed: SriDigest[] = [];
+  for (const token of value.trim().split(/\s+/)) {
+    const match = /^(sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})(?:\?[^\s]+)?$/.exec(token);
+    if (!match) continue;
+    const algorithm = match[1] as SupportedSriAlgorithm;
+    const encoded = match[2]!;
+    const digest = Buffer.from(encoded, "base64");
+    if (digest.length === 0 || digest.toString("base64") !== encoded) continue;
+    parsed.push({ algorithm, digest });
+  }
+  if (parsed.length === 0) return [];
+  const strongest = Math.max(...parsed.map((entry) => SRI_STRENGTH[entry.algorithm]));
+  return parsed.filter((entry) => SRI_STRENGTH[entry.algorithm] === strongest);
+}
+
+/** Verify bytes against the strongest supported algorithm present in the SRI. */
+export async function verifyArtifactIntegrity(path: string, integrity: string): Promise<boolean> {
+  const expected = parseSri(integrity);
+  if (expected.length === 0) return false;
+  const algorithm = expected[0]!.algorithm;
+  const hash = createHash(algorithm);
+  try {
+    for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  } catch {
+    return false;
+  }
+  const actual = hash.digest();
+  return expected.some(
+    (entry) => entry.digest.length === actual.length && timingSafeEqual(entry.digest, actual),
+  );
+}
+
+function resolveMetadata(
+  pkg: string,
+  version: string,
+  registry: string,
+  cacheDir: string,
+  cwd: string,
+): ArtifactMetadataResult {
+  const spec = `${pkg}@${version}`;
+  const output = runNpmCapture(
+    [
+      "view",
+      spec,
+      "version",
+      "dist.integrity",
+      "dist.tarball",
+      "--json",
+      "--prefer-online",
+      `--cache=${cacheDir}`,
+      `--registry=${registry}`,
+    ],
+    cwd,
+    30_000,
+  );
+  if (!output.ok) return { ok: false, error: `Could not resolve ${spec}: ${output.error}` };
+  return parseNpmArtifactMetadata(output.value);
+}
+
+export interface PackedArtifactSelection {
+  version: string;
+  integrity: string;
+  tarballPath: string;
+}
+
+/** Parse npm pack's one selected artifact, never npm view's multi-version range output. */
+export function parsePackedArtifactSelection(
+  stdout: string,
+  tempDir: string,
+  expectedPackage: string,
+): PackedArtifactSelection | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(stdout) as unknown;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length !== 1 || !isPlainObject(value[0])) return null;
+  const name = value[0].name;
+  const version = value[0].version;
+  const integrity = value[0].integrity;
+  const filename = value[0].filename;
+  if (name !== expectedPackage || typeof version !== "string" || !EXACT_VERSION.test(version)) return null;
+  if (typeof integrity !== "string" || parseSri(integrity).length === 0) return null;
+  if (typeof filename !== "string" || filename !== basename(filename) || !filename.endsWith(".tgz")) return null;
+  const candidate = resolve(tempDir, filename);
+  if (dirname(candidate) !== resolve(tempDir)) return null;
+  try {
+    const stat = lstatSync(candidate);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > MAX_ARTIFACT_BYTES) return null;
+  } catch {
+    return null;
+  }
+  return { version, integrity, tarballPath: candidate };
+}
+
+export function disposePreparedArtifact(artifact: PreparedNpmArtifact): void {
+  const expectedParent = resolve(tmpdir());
+  const target = resolve(artifact.tempDir);
+  if (dirname(target) !== expectedParent || !basename(target).startsWith("domaininstall-artifact-")) return;
+  try {
+    rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {
+    // Cleanup must not replace the install result. The private random temp
+    // directory contains only public package bytes and npm cache metadata.
+  }
+}
+
+/** Resolve once, download with npm's auth, then independently verify the bytes. */
+export async function prepareNpmArtifact(
+  pkg: string,
+  selector: string | undefined,
+  registry: string,
+  cwd = process.cwd(),
+): Promise<PrepareArtifactResult> {
+  const tempDir = mkdtempSync(join(tmpdir(), "domaininstall-artifact-"));
+  if (process.platform !== "win32") chmodSync(tempDir, 0o700);
+  const cacheDir = join(tempDir, "npm-cache");
+  let prepared: PreparedNpmArtifact | undefined;
+  try {
+    const requestedSpec = selector ? `${pkg}@${selector}` : pkg;
+    // npm pack and npm install share npm's pacote resolver. Let that resolver
+    // select one exact version directly; `npm view pkg@range ... --json` is not
+    // suitable here because it returns an array for ranges with many releases.
+    const packed = runNpmCapture(
+      [
+        "pack",
+        requestedSpec,
+        "--ignore-scripts",
+        "--json",
+        `--pack-destination=${tempDir}`,
+        "--prefer-online",
+        `--cache=${cacheDir}`,
+        `--registry=${registry}`,
+      ],
+      cwd,
+      120_000,
+    );
+    if (!packed.ok) return { ok: false, error: `Could not resolve and download ${requestedSpec}: ${packed.error}` };
+    const selection = parsePackedArtifactSelection(packed.value, tempDir, pkg);
+    if (!selection) return { ok: false, error: "npm produced an invalid or oversized package archive." };
+
+    // Exact-version metadata is always one object. It supplies the canonical
+    // tarball URL and registry SRI for the exact artifact npm pack selected.
+    const selected = resolveMetadata(pkg, selection.version, registry, cacheDir, cwd);
+    if (!selected.ok) return selected;
+    const identity = selected.artifact;
+    if (identity.version !== selection.version || identity.integrity !== selection.integrity) {
+      return { ok: false, error: `Registry metadata did not match npm's selected ${pkg}@${selection.version}.` };
+    }
+    if (!(await verifyArtifactIntegrity(selection.tarballPath, identity.integrity))) {
+      return { ok: false, error: `Downloaded bytes for ${pkg}@${identity.version} do not match the resolved SRI.` };
+    }
+    prepared = {
+      version: identity.version,
+      integrity: identity.integrity,
+      tarball: identity.tarball,
+      resolvedAt: new Date().toISOString(),
+      tarballPath: selection.tarballPath,
+      cacheDir,
+      tempDir,
+    };
+    return { ok: true, artifact: prepared };
+  } finally {
+    if (!prepared) {
+      disposePreparedArtifact({
+        version: "0.0.0",
+        integrity: "",
+        tarball: "",
+        resolvedAt: "",
+        tarballPath: "",
+        cacheDir,
+        tempDir,
+      });
+    }
+  }
+}
+
+/** Re-fetch exact metadata after confirmation and seed only the verified bytes. */
+export async function recheckAndSeedNpmArtifact(
+  pkg: string,
+  artifact: PreparedNpmArtifact,
+  registry: string,
+  cwd = process.cwd(),
+): Promise<RegistryResult> {
+  const current = resolveMetadata(pkg, artifact.version, registry, artifact.cacheDir, cwd);
+  if (!current.ok) return { ok: false, error: current.error };
+  const next = current.artifact;
+  if (
+    next.version !== artifact.version ||
+    next.integrity !== artifact.integrity ||
+    next.tarball !== artifact.tarball
+  ) {
+    return {
+      ok: false,
+      error:
+        `Registry artifact metadata for ${pkg}@${artifact.version} changed after confirmation. ` +
+        "Installation is refused; resolve and review it again.",
+    };
+  }
+  if (!(await verifyArtifactIntegrity(artifact.tarballPath, artifact.integrity))) {
+    return { ok: false, error: "The verified package archive changed before npm handoff." };
+  }
+  const seeded = runNpmCapture(
+    ["cache", "add", artifact.tarballPath, "--ignore-scripts", `--cache=${artifact.cacheDir}`],
+    cwd,
+    120_000,
+  );
+  if (!seeded.ok) return { ok: false, error: `Could not seed the verified npm artifact: ${seeded.error}` };
+  let archiveStillValid = false;
+  try {
+    const after = statSync(artifact.tarballPath);
+    archiveStillValid = after.isFile() && after.size > 0 && after.size <= MAX_ARTIFACT_BYTES;
+  } catch {
+    archiveStillValid = false;
+  }
+  if (!archiveStillValid) {
+    return { ok: false, error: "The verified package archive changed before npm handoff." };
+  }
+  return { ok: true, registry };
 }
 
 /**

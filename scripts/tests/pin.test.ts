@@ -50,6 +50,13 @@ async function run(h: Harness): Promise<void> {
   h.check("getPin returns package", getPin(domain)?.package === "pkg-a");
   h.check("firstSeen set", typeof getPin(domain)?.firstSeen === "string");
   h.check("lastSeen set", typeof getPin(domain)?.lastSeen === "string");
+  h.check(
+    "legacy-style save records explicit unknown artifact state",
+    getPin(domain)?.resolvedVersion === null &&
+      getPin(domain)?.integrity === null &&
+      getPin(domain)?.tarball === null &&
+      getPin(domain)?.resolvedAt === null,
+  );
 
   const match = diffPin(domain, base);
   h.check("diff empty when identical", match.changes.length === 0 && match.existing !== null);
@@ -120,9 +127,90 @@ async function run(h: Harness): Promise<void> {
     version: number;
     pins: Record<string, unknown>;
   };
-  h.check("schema version 1", raw.version === 1);
+  h.check("schema version 2", raw.version === 2);
   h.check("pins object present", typeof raw.pins === "object");
   h.check("PIN_FILE basename is pins.json", PIN_FILE.endsWith("pins.json"));
+
+  const artifact = {
+    resolvedVersion: "2.4.1",
+    integrity: `sha512-${Buffer.alloc(64, 7).toString("base64")}`,
+    tarball: "https://registry.npmjs.org/pkg-a/-/pkg-a-2.4.1.tgz",
+    resolvedAt: "2026-08-23T00:00:00.000Z",
+  };
+  const artifactDomain = "artifact.example";
+  h.check("saves complete immutable artifact identity", savePin(artifactDomain, { ...base, ...artifact }).ok);
+  h.check(
+    "round-trips artifact version, SRI, URL, and resolution time",
+    getPin(artifactDomain)?.resolvedVersion === artifact.resolvedVersion &&
+      getPin(artifactDomain)?.integrity === artifact.integrity &&
+      getPin(artifactDomain)?.tarball === artifact.tarball &&
+      getPin(artifactDomain)?.resolvedAt === artifact.resolvedAt,
+  );
+  const versionReview = diffPin(artifactDomain, { ...base, ...artifact, resolvedVersion: "2.5.0" });
+  h.check(
+    "exact-version changes require review but are not same-version mutations",
+    versionReview.changes.some((change) => change.field === "resolvedVersion") && !versionReview.blockedArtifactMutation,
+  );
+  const swappedIntegrity = diffPin(artifactDomain, {
+    ...base,
+    ...artifact,
+    integrity: `sha512-${Buffer.alloc(64, 8).toString("base64")}`,
+  });
+  h.check(
+    "same-version integrity replacement is a hard block",
+    swappedIntegrity.blockedArtifactMutation && swappedIntegrity.changes.some((change) => change.field === "integrity"),
+  );
+  const movedTarball = diffPin(artifactDomain, { ...base, ...artifact, tarball: "https://cdn.example/pkg-a-2.4.1.tgz" });
+  h.check("same-version canonical tarball replacement is a hard block", movedTarball.blockedArtifactMutation);
+  const changedSubjectIntegrity = `sha512-${Buffer.alloc(64, 11).toString("base64")}`;
+  const packageSubjectChange = diffPin(artifactDomain, {
+    ...base,
+    ...artifact,
+    package: "pkg-b",
+    integrity: changedSubjectIntegrity,
+    tarball: "https://registry.npmjs.org/pkg-b/-/pkg-b-2.4.1.tgz",
+  });
+  h.check(
+    "same version on a different package subject follows manual review, not mutation hard-block",
+    !packageSubjectChange.blockedArtifactMutation &&
+      packageSubjectChange.changes.some((change) => change.field === "package") &&
+      packageSubjectChange.changes.some((change) => change.field === "integrity"),
+  );
+  const registrySubjectChange = diffPin(artifactDomain, {
+    ...base,
+    ...artifact,
+    registry: "https://packages.example/",
+    integrity: changedSubjectIntegrity,
+    tarball: "https://packages.example/pkg-a/-/pkg-a-2.4.1.tgz",
+  });
+  h.check(
+    "same version on a different registry follows manual review, not mutation hard-block",
+    !registrySubjectChange.blockedArtifactMutation &&
+      registrySubjectChange.changes.some((change) => change.field === "registry"),
+  );
+  const namespaceSubjectChange = diffPin(artifactDomain, {
+    ...base,
+    ...artifact,
+    namespace: "other",
+    integrity: changedSubjectIntegrity,
+  });
+  h.check(
+    "same version in a different namespace follows manual review, not mutation hard-block",
+    !namespaceSubjectChange.blockedArtifactMutation &&
+      namespaceSubjectChange.changes.some((change) => change.field === "namespace"),
+  );
+  h.check(
+    "rejects partial artifact identities",
+    !savePin("partial.example", { ...base, resolvedVersion: "1.0.0" }).ok,
+  );
+  h.check(
+    "rejects malformed or wrong-length SRI in trust state",
+    !savePin("bad-sri.example", {
+      ...base,
+      ...artifact,
+      integrity: "sha512-YmFk",
+    }).ok,
+  );
 
   // second domain
   savePin("other.example", {
@@ -165,6 +253,43 @@ async function run(h: Harness): Promise<void> {
     versionThrew = true;
   }
   h.check("unknown schema version fails closed", versionThrew);
+  resetPinStore();
+
+  // v1 migration must preserve unknown as unknown, never look up or invent SRI.
+  const legacyTime = "2026-08-01T00:00:00.000Z";
+  writeFileSync(
+    join(state, "pins.json"),
+    JSON.stringify({
+      version: 1,
+      pins: {
+        "legacy.example": {
+          namespace: "npm",
+          package: "legacy-pkg",
+          registry: "https://registry.npmjs.org/",
+          dnsVersion: "^1",
+          firstSeen: legacyTime,
+          lastSeen: legacyTime,
+        },
+      },
+    }),
+    "utf8",
+  );
+  const migrated = getPin("legacy.example");
+  h.check(
+    "v1 migration exposes explicit unknown artifact state",
+    migrated?.resolvedVersion === null && migrated.integrity === null && migrated.tarball === null && migrated.resolvedAt === null,
+  );
+  savePin("migration-trigger.example", base);
+  const migratedRaw = JSON.parse(readFileSync(join(state, "pins.json"), "utf8")) as {
+    version: number;
+    pins: Record<string, { integrity?: unknown; resolvedVersion?: unknown }>;
+  };
+  h.check(
+    "next write migrates v1 to v2 without inventing artifact identity",
+    migratedRaw.version === 2 &&
+      migratedRaw.pins["legacy.example"]?.resolvedVersion === null &&
+      migratedRaw.pins["legacy.example"]?.integrity === null,
+  );
   resetPinStore();
 
   // invalid pin entry inside valid schema

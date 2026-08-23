@@ -105,6 +105,9 @@ license, security policy, and roadmap.
   lock-protected) with documented recovery and clear Windows ACL limits
 - DNS version policy pinned separately from a CLI override, so a one-off
   `@version` can’t silently replace the domain’s declared policy
+- Exact root version, SRI, and canonical tarball URL resolved and shown before
+  confirmation, independently byte-verified, rechecked after confirmation, and
+  persisted in an explicit v2 artifact-continuity pin
 - Strict argument parsing before any DNS, install, or pin operation
 - Deterministic adversarial tests for each of the above
 
@@ -198,7 +201,9 @@ close it — so a future decision doesn’t have to re-derive the reasoning.
 Gap IDs are stable and are not reused when a gap closes.
 
 **Closed:** G2 — `di trust list` and `di trust forget <domain>` ship, so recovery
-from one bad pin no longer requires discarding every remembered mapping.
+from one bad pin no longer requires discarding every remembered mapping. The
+artifact-continuity portion of G7 is also closed; publisher identity and
+provenance remain intentionally separate signals.
 
 | ID | Gap | Severity | Why acceptable now | Closed when |
 | --- | --- | --- | --- | --- |
@@ -207,7 +212,7 @@ from one bad pin no longer requires discarding every remembered mapping.
 | G4 | No non-interactive / machine-readable mode | High | Interactive confirmation is the core safety property for humans | `di resolve --json` ships with a stable schema and exit codes (see bet 2) |
 | G5 | pnpm, Yarn, and Bun projects are refused | Medium | Non-npm lockfiles are detected and refused rather than mishandled | Each has a scripts-disabled install path plus its own adversarial tests |
 | G6 | Every lookup discloses the requested domain to a third-party resolver | Medium | Documented in `SECURITY.md`; install and verify both show the DoH host | Closed for transparency (resolver shown). Disclosure itself is inherent to third-party DoH |
-| G7 | Pins record mapping, registry, and DNS version policy only | Medium | Defeats the headline repoint attack for returning users | Publisher identity and tarball integrity are pinned and diffed (see §6) |
+| G7 | Publisher identity and provenance are not pinned | Medium | Exact root version, canonical tarball, and SRI continuity now ship; those bind bytes, not publisher legitimacy | A stable publisher/provenance identity is defined, pinned, and diffed without overstating package safety |
 | G8 | Pins never expire | Medium | Continuity checks still run on every install | Pins carry a `maxAge` that forces full re-verification |
 | G9 | No registration-liveness (RDAP) check | Medium | Needs per-TLD handling and degrades under privacy proxies | A changed registration/creation date blocks and requires re-confirmation |
 | G10 | First-time users have nothing to compare against | Low (by design) | Inherent to TOFU and stated plainly in the README | Deferred to the transparency-log design; needs infrastructure |
@@ -224,13 +229,13 @@ this table is what actually ships today — so the two don’t get mixed up.
 | Layer | Design intent | Shipped? |
 | --- | --- | --- |
 | 0 — Authentic resolution | DoH transport; prefer DNSSEC, don’t require it | **Yes.** DoH with `do=1`; AD bit shows as `DNSSEC: AD` / `DNSSEC: no AD` (resolver-reported, not client-validated or package-safe) |
-| 1 — TOFU local pin | Pin the full resolved identity | **Partial.** Namespace, package, registry, DNS version policy, first/last seen are pinned. Publisher, tarball integrity, provenance state, and DNSSEC state are not |
-| 2 — Re-verify and diff | Block loudly on any identity change | **Partial.** Diffs the four pinned fields and can’t be bypassed with `--yes`. Can’t detect publisher or integrity changes it doesn’t pin |
+| 1 — TOFU local pin | Pin the full resolved identity | **Partial.** Namespace, package, registry, DNS policy, exact root version, SRI, canonical tarball URL, resolution time, and first/last seen are pinned. Publisher, provenance, and DNSSEC state are not |
+| 2 — Re-verify and diff | Block loudly on any identity change | **Partial.** Mapping and root artifact fields are diffed. Exact-version changes require manual review; same-version integrity/tarball mutations fail closed. Publisher and provenance changes remain undetected |
 | 3 — RDAP liveness | Detect re-registration and transfer | **No.** See G9 |
 | 4 — Short trust window | Pins expire and force re-verification | **No.** See G8 |
 | 5 — Transparency log | Protect first-time users | **No.** Needs infrastructure; conflicts with the zero-infra stance. See G10 |
 | 6 — Provenance signal | Surface provenance and publisher match | **No.** See G7 |
-| Anti-TOCTOU | Resolve once, never re-resolve after confirmation | **Yes.** Resolution happens before the preview; the confirmed values are what get executed |
+| Anti-TOCTOU | Resolve once, never silently substitute after confirmation | **Yes for the root artifact.** The policy resolves to an exact version before preview, archive bytes are SRI-verified, exact metadata is rechecked after confirmation, and npm receives only the exact selector through an isolated cache. Transitive dependency resolution remains npm’s responsibility |
 
 The design doc’s inherited convention “never error on invalid records — ignore
 and move on” deliberately does **not** apply to ownership-change signals. Those

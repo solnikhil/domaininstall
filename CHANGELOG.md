@@ -31,6 +31,19 @@ when that happens.
 ### Changed
 
 - `--force` now applies to both `trust forget` and `trust reset`.
+- npm ranges and tags now resolve to one exact root version before confirmation;
+  the preview includes the full SRI and canonical tarball URL, and npm receives
+  an exact `--save-exact` registry dependency rather than the floating policy.
+
+### Security
+
+- Root package archives are independently checked against the registry SRI,
+  exact metadata is rechecked after confirmation, and verified bytes are seeded
+  into an isolated npm cache before installation.
+- Trust-store schema v2 pins exact root version, SRI, tarball URL, and resolution
+  time. v1 pins migrate to explicit unknown artifact state. Exact-version
+  changes require manual review even with `--yes`; same-version SRI or tarball
+  mutation fails closed.
 
 ## [0.0.3] - 2026-07-27
 
