@@ -120,6 +120,81 @@ globalThis.fetch = async () => {
   );
   h.check("verify does not install", !existsSync(marker));
 
+  // resolve JSON success: stdout is one document and no install/trust write occurs.
+  if (existsSync(marker)) rmSync(marker);
+  const resolveState = join(root, "resolve-state");
+  const resolve = runCli(["resolve", "EXAMPLE.com/sub@^2", "--json"], {
+    DOMAININSTALL_STATE_DIR: resolveState,
+    DOMAININSTALL_TEST_DNS_MODE: "versioned",
+  });
+  let resolveJson: Record<string, any> | undefined;
+  try {
+    resolveJson = JSON.parse(resolve.stdout) as Record<string, any>;
+  } catch {
+    /* asserted below */
+  }
+  h.check(
+    "resolve emits exactly one strict JSON document on stdout",
+    resolve.status === 0 &&
+      resolve.stderr === "" &&
+      resolve.stdout.startsWith("{") &&
+      resolve.stdout.endsWith("}\n") &&
+      resolveJson?.schemaVersion === 1 &&
+      resolveJson?.input?.effectiveDomain === "sub.example.com",
+  );
+  h.check(
+    "resolve never installs or writes trust state",
+    !existsSync(marker) && !existsSync(join(resolveState, "pins.json")),
+  );
+  const missingResolveState = join(root, "resolve-missing-state");
+  const noStateResolve = spawnSync(
+    process.execPath,
+    ["--import", mockDnsUrl, cli, "resolve", "example.com", "--json"],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...(process.platform === "win32" ? { Path: gatePath, PATH: gatePath } : { PATH: gatePath }),
+        npm_execpath: "",
+        DOMAININSTALL_TEST_MARKER: marker,
+        DOMAININSTALL_STATE_DIR: missingResolveState,
+        DOMAININSTALL_TEST_DNS_MODE: "single",
+      },
+    },
+  );
+  h.check(
+    "resolve does not create a missing trust-state directory",
+    noStateResolve.status === 0 && !existsSync(missingResolveState) && !existsSync(marker),
+  );
+
+  const invalidResolve = runCli(["resolve", "not-a-domain", "--json"], {
+    DOMAININSTALL_STATE_DIR: join(root, "resolve-invalid-state"),
+  });
+  const invalidResolveJson = JSON.parse(invalidResolve.stdout) as { exitCode: number; error: { code: string } };
+  h.check("resolve invalid input exits 2 with JSON", invalidResolve.status === 2 && invalidResolveJson.exitCode === 2 && invalidResolveJson.error.code === "INVALID_TARGET" && invalidResolve.stderr === "");
+
+  const usageResolve = runCli(["resolve", "--json"], {
+    DOMAININSTALL_STATE_DIR: join(root, "resolve-usage-state"),
+  });
+  const usageResolveJson = JSON.parse(usageResolve.stdout) as { exitCode: number; error: { code: string } };
+  h.check("resolve JSON mode keeps usage failures machine-readable", usageResolve.status === 2 && usageResolveJson.exitCode === 2 && usageResolveJson.error.code === "USAGE" && usageResolve.stderr === "");
+
+  const conflictResolve = runCli(["resolve", "multi.example", "--json"], {
+    DOMAININSTALL_STATE_DIR: join(root, "resolve-conflict-state"),
+    DOMAININSTALL_TEST_DNS_MODE: "multi",
+  });
+  const conflictResolveJson = JSON.parse(conflictResolve.stdout) as { exitCode: number; mappings: { conflicts: unknown[] } };
+  h.check("resolve conflict exits 5 and preserves conflicts", conflictResolve.status === 5 && conflictResolveJson.exitCode === 5 && conflictResolveJson.mappings.conflicts.length === 2);
+
+  const corruptResolveState = join(root, "resolve-corrupt-state");
+  mkdirSync(corruptResolveState);
+  writeFileSync(join(corruptResolveState, "pins.json"), "not-json", "utf8");
+  const corruptResolve = runCli(["resolve", "example.com", "--json"], {
+    DOMAININSTALL_STATE_DIR: corruptResolveState,
+  });
+  const corruptResolveJson = JSON.parse(corruptResolve.stdout) as { exitCode: number; error: { code: string } };
+  h.check("resolve unsafe pin state still emits JSON and exits 8", corruptResolve.status === 8 && corruptResolveJson.exitCode === 8 && corruptResolveJson.error.code === "PIN_STORE_FAILURE" && corruptResolve.stderr === "");
+
   // verify NXDOMAIN
   const nx = runCli(["verify", "missing.example"], {
     DOMAININSTALL_STATE_DIR: join(root, "nx-state"),

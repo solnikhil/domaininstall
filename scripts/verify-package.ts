@@ -42,7 +42,14 @@ try {
 
   const artifact = packResult[0]!;
   const paths = new Set(artifact.files.map((file) => file.path));
-  for (const required of ["README.md", "LICENSE", "package.json", "dist/cli.js"]) {
+  for (const required of [
+    "README.md",
+    "LICENSE",
+    "package.json",
+    "dist/cli.js",
+    "schema/resolve-v1.schema.json",
+    "docs/RESOLVE-JSON.md",
+  ]) {
     if (!paths.has(required)) throw new Error(`packed artifact is missing ${required}`);
   }
   for (const path of paths) {

@@ -17,7 +17,9 @@
     "dnstall": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "schema",
+    "docs/RESOLVE-JSON.md"
   ],
   "engines": {
     "node": ">=22.14.0"

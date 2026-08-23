@@ -8,6 +8,8 @@ install or try the CLI.
 
 - [DNS record format](RECORD-FORMAT.md) defines the `_dnstall` TXT record,
   canonical publisher output, consumer behavior, and compatibility rules.
+- [`resolve --json` contract](RESOLVE-JSON.md) defines the versioned machine
+  schema, outcome enums, exit codes, and compatibility policy.
 - [Security policy](../SECURITY.md) defines the project's security boundary,
   supported versions, and vulnerability-reporting process.
 - [Domain-ownership analysis](../SECURITY-domain-ownership.md) examines what a

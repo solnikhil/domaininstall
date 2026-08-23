@@ -1,9 +1,11 @@
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +26,7 @@ async function run(h: Harness): Promise<void> {
   // This module is loaded as part of exhaustive suite which sets env first in the runner.
 
   const pin = await import("../../dist/pin.js");
-  const { diffPin, getPin, listPins, resetPinStore, savePin, PIN_FILE } = pin as typeof pin & {
+  const { diffPin, getPin, inspectPin, listPins, resetPinStore, savePin, PIN_FILE } = pin as typeof pin & {
     listPins?: () => unknown;
   };
 
@@ -123,6 +125,33 @@ async function run(h: Harness): Promise<void> {
   h.check("schema version 1", raw.version === 1);
   h.check("pins object present", typeof raw.pins === "object");
   h.check("PIN_FILE basename is pins.json", PIN_FILE.endsWith("pins.json"));
+
+  if (process.platform !== "win32") {
+    chmodSync(state, 0o755);
+    let unsafeDirectoryThrew = false;
+    try {
+      inspectPin(domain);
+    } catch {
+      unsafeDirectoryThrew = true;
+    }
+    h.check(
+      "read-only inspection rejects rather than repairs unsafe directory permissions",
+      unsafeDirectoryThrew && (statSync(state).mode & 0o777) === 0o755,
+    );
+    chmodSync(state, 0o700);
+    chmodSync(join(state, "pins.json"), 0o644);
+    let unsafeFileThrew = false;
+    try {
+      inspectPin(domain);
+    } catch {
+      unsafeFileThrew = true;
+    }
+    h.check(
+      "read-only inspection rejects rather than repairs unsafe file permissions",
+      unsafeFileThrew && (statSync(join(state, "pins.json")).mode & 0o777) === 0o644,
+    );
+    chmodSync(join(state, "pins.json"), 0o600);
+  }
 
   // second domain
   savePin("other.example", {

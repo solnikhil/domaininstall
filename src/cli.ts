@@ -7,11 +7,12 @@
  *   domaininstall <domain>                     descriptive alias
  *   dnstall <domain>                           legacy short alias
  *   di verify <domain>                         diagnose the record, no install
+ *   di resolve <domain> --json                 machine-readable resolution
  */
 
 import { createRequire } from "node:module";
 
-import { resolveTxt, type DnsAttempt } from "./doh.js";
+import { resolveTxt } from "./doh.js";
 import { parseCliArgs } from "./args.js";
 import {
   distinctRecordMappings,
@@ -43,6 +44,12 @@ import {
 } from "./install.js";
 import { c, ce, info, detail, warn, error, success, confirm } from "./ui.js";
 import { sanitizeTerminalText } from "./terminal.js";
+import {
+  internalResolutionFailure,
+  invalidResolutionRequest,
+  resolveDomain,
+  type ResolutionDocument,
+} from "./resolve.js";
 
 const NAMESPACE = "npm"; // only npm is wired up in v0
 
@@ -156,15 +163,6 @@ function resolverName(provider: string): string {
     return new URL(provider).host;
   } catch {
     return provider;
-  }
-}
-
-function printResolverAttempts(attempts: DnsAttempt[]): void {
-  if (attempts.length === 0) return;
-  info(c.dim("  attempts:"));
-  for (const attempt of attempts) {
-    const status = attempt.status === undefined ? "" : ` (status ${attempt.status})`;
-    info(c.dim(`    ${resolverName(attempt.provider)}: ${attempt.outcome}${status}`));
   }
 }
 
@@ -324,142 +322,97 @@ async function cmdInstall(target: string, opts: { yes: boolean; global: boolean 
 }
 
 async function cmdVerify(target: string): Promise<number> {
-  const parsed = parseTarget(target);
-  if (!parsed.ok) {
-    error(parsed.error);
+  let model: ResolutionDocument;
+  try {
+    model = await resolveDomain(target);
+  } catch (caught) {
+    model = internalResolutionFailure(target, caught);
+  }
+
+  if (!model.input.dnsName) {
+    error(model.error?.message ?? "Resolution failed before DNS lookup.");
     return 1;
   }
-  const { domain, sub } = parsed.value;
-  const effectiveDomain = sub ? `${sub}.${domain}` : domain;
-  const dnsName = `_${DNS_PREFIX}.${effectiveDomain}`;
 
-  info(`\n  Looking up ${c.cyan(dnsName)} ...\n`);
-  const txt = await resolveTxt(DNS_PREFIX, effectiveDomain);
-
-  if (txt.provider) info(c.dim(`  resolver:  ${resolverName(txt.provider)}`));
-  info(c.dim(`  outcome:   ${txt.outcome}`));
-  printResolverAttempts(txt.attempts);
-  info(`  ${dnssecBadge(txt.authenticated)}`);
+  info(`\n  Looking up ${c.cyan(model.input.dnsName)} ...\n`);
+  if (model.dns.resolver) info(c.dim(`  resolver:  ${model.dns.resolver.identity}`));
+  info(c.dim(`  outcome:   ${model.dns.outcome}`));
+  if (model.dns.attempts.length > 0) {
+    info(c.dim("  attempts:"));
+    for (const attempt of model.dns.attempts) {
+      const status = attempt.status === null ? "" : ` (status ${attempt.status})`;
+      info(c.dim(`    ${attempt.identity}: ${attempt.outcome}${status}`));
+    }
+  }
+  info(`  ${dnssecBadge(model.dns.dnssec.ad)}`);
   info("");
 
-  if (txt.outcome === "provider_exhaustion") {
-    error("DNS lookup failed after exhausting every configured resolver.");
-    return 1;
+  if (model.dns.records.length > 0) {
+    info(c.dim("  raw TXT records:"));
+    for (const record of model.dns.records) info(`    ${sanitizeTerminalText(record)}`);
+    info("");
   }
 
-  if (txt.outcome === "nxdomain" || txt.outcome === "nodata") {
-    error(
-      txt.outcome === "nxdomain"
-        ? "The requested DNS name does not exist (NXDOMAIN)."
-        : "The DNS name exists but has no TXT answer (NODATA).",
-    );
-    detail(
-      `\n  To enable it, publish:\n    ${c.dim(`${dnsName}  TXT  "dnstall=pkg:npm/<package>"`)}\n`,
-    );
-    return 1;
-  }
-
-  info(c.dim("  raw TXT records:"));
-  for (const rec of txt.records) info(`    ${sanitizeTerminalText(rec)}`);
-  info("");
-
-  const records = parseRecords(txt.records);
-  if (records.length === 0) {
-    warn("TXT records exist, but none are valid domaininstall records.");
-    return 1;
-  }
-
-  for (const rec of records) {
-    const supported = rec.namespace === NAMESPACE;
+  for (const mapping of [...model.mappings.supported, ...model.mappings.unsupported]) {
+    const supported = mapping.namespace === NAMESPACE;
     info(
-      `  ${supported ? c.green("●") : c.yellow("○")} ${c.bold(rec.package)}` +
-        `  ${c.dim(`(${rec.namespace}${rec.version ? " @ " + rec.version : ""})`)}` +
+      `  ${supported ? c.green("●") : c.yellow("○")} ${c.bold(mapping.package)}` +
+        `  ${c.dim(`(${mapping.namespace}${mapping.dnsVersionPolicy ? " @ " + mapping.dnsVersionPolicy : ""})`)}` +
         (supported ? "" : c.dim("  — namespace not supported in v0")),
     );
   }
 
-  const supportedMappings = distinctRecordMappings(
-    records.filter((record) => record.namespace === NAMESPACE),
-  );
-  if (supportedMappings.length > 1) {
-    info("");
-    error("Conflicting supported mappings found; installation would be refused.");
-    return 1;
-  }
-  if (supportedMappings.length === 0) {
-    info("");
-    warn("No mapping uses the npm namespace supported by this alpha.");
-    return 1;
-  }
-  const supportedRecord = supportedMappings[0]!;
-  const packageCheck = validatePackageName(supportedRecord.package);
-  if (!packageCheck.ok) {
-    error(`The npm mapping contains an invalid package name: ${packageCheck.error}`);
-    return 1;
-  }
-  if (supportedRecord.version) {
-    const versionCheck = validateVersionRange(supportedRecord.version);
-    if (!versionCheck.ok) {
-      error(`The npm mapping contains an invalid version policy: ${versionCheck.error}`);
-      return 1;
-    }
+  if (model.registry.status === "resolved" && model.mappings.selected && npmScopeOf(model.mappings.selected.package)) {
+    info(c.dim(`  registry for this package: ${model.registry.effective}`));
   }
 
-  // Effective registry for pin continuity comparison (and scoped-package honesty).
-  let effectiveRegistry: string | undefined;
-  let registryLookupFailed = false;
-  const effective = resolveEffectiveRegistry(supportedRecord.package);
-  if (effective.ok) {
-    effectiveRegistry = effective.registry;
-    if (npmScopeOf(supportedRecord.package)) {
-      info(c.dim(`  registry for this package: ${effective.registry}`));
-    }
-  } else {
-    registryLookupFailed = true;
+  if (model.pin.current) {
+    const pin = model.pin.current;
     info("");
-    warn(effective.error);
-  }
-
-  const pin = getPin(effectiveDomain);
-  info("");
-  if (pin) {
     info(c.dim(`  pin: first seen ${pin.firstSeen.slice(0, 10)} → ${pin.package} (${pin.namespace})`));
     info(c.dim(`  pin DNS policy: ${pin.dnsVersion ?? "latest"}`));
     info(c.dim(`  pin registry: ${pin.registry}`));
+    if (model.pin.status === "match") info(c.dim("  pin: matches live mapping"));
+  } else if (model.pin.status === "absent") {
+    info("");
+    info(c.dim("  pin: none yet (will be recorded on first install)"));
+  }
+  if (model.pin.status !== "not_checked") info(c.dim(`  pin file: ${PIN_FILE}`));
 
-    const pinNext = {
-      namespace: supportedRecord.namespace,
-      package: supportedRecord.package,
-      // If npm config cannot be read, compare other fields only by holding registry constant.
-      registry: effectiveRegistry ?? pin.registry,
-      dnsVersion: supportedRecord.version ?? null,
-    };
-    const { changes } = diffPin(effectiveDomain, pinNext);
-    if (changes.length > 0) {
-      info("");
-      warn("Live DNS/registry mapping does not match the local trust pin.");
-      for (const ch of changes) {
-        detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
+  if (!model.ok) {
+    info("");
+    if (model.error?.code === "PIN_CHANGED") {
+      warn(model.error.message);
+      for (const change of model.pin.diff) {
+        detail(`    ${change.field}: ${ce.red(change.was)} ${ce.dim("→")} ${ce.yellow(change.now)}`);
       }
       detail(ce.dim("    Record syntax is valid, but continuity check failed."));
       detail(ce.dim("    Install would require interactive confirmation ( --yes is ignored )."));
-      return 1;
+    } else {
+      error(model.error?.message ?? "Resolution failed.");
+      if (model.error?.code === "DNS_NXDOMAIN" || model.error?.code === "DNS_NODATA") {
+        detail(
+          `\n  To enable it, publish:\n    ${c.dim(`${model.input.dnsName}  TXT  "dnstall=pkg:npm/<package>"`)}\n`,
+        );
+      }
     }
-    if (registryLookupFailed) {
-      warn("Could not re-read npm registry config; pin registry field was not re-checked.");
-    }
-    info(c.dim("  pin: matches live mapping"));
-  } else {
-    info(c.dim("  pin: none yet (will be recorded on first install)"));
+    return 1;
   }
-  info(c.dim(`  pin file: ${PIN_FILE}`));
+
   info("");
-  if (pin) {
-    success("Record looks valid and matches the trust pin.");
-  } else {
-    success("Record looks valid.");
-  }
+  success(model.pin.status === "match" ? "Record looks valid and matches the trust pin." : "Record looks valid.");
   return 0;
+}
+
+async function cmdResolve(target: string): Promise<number> {
+  let document: ResolutionDocument;
+  try {
+    document = await resolveDomain(target);
+  } catch (caught) {
+    document = internalResolutionFailure(target, caught);
+  }
+  process.stdout.write(`${JSON.stringify(document)}\n`);
+  return document.exitCode;
 }
 
 /**
@@ -666,6 +619,7 @@ ${c.bold("di")} — install a package by domain name
 ${c.dim("USAGE")}
   di <domain>[/sub][@version] [-g]           resolve, confirm, and install
   di verify <domain>                         diagnose the DNS record (no install)
+  di resolve <domain>[/sub][@version] --json resolve to versioned JSON (no writes)
   di setup <domain>[/sub] <package>[@range]  print the TXT record to publish
   di trust list                              show every remembered mapping
   di trust forget <domain> [--force]         remove one remembered mapping
@@ -679,6 +633,7 @@ ${c.dim("EXAMPLES")}
   di stripe.com@^18                  override the install version range
   di stripe.com --global             install globally instead of into this project
   di verify zuraai.xyz               check the record without installing
+  di resolve zuraai.xyz --json       resolve for CI and other machine consumers
   di setup example.com my-package    generate the record a publisher must add
   di setup example.com/react ui@^2   generate a sub-package record with a policy
   di trust list                      review which mappings are remembered
@@ -690,6 +645,7 @@ ${c.dim("OPTIONS")}
   -h, --help       show this help
   -V, --version    show version
   --force          skip the confirmation prompt (only with trust forget/reset)
+  --json           emit the resolve v1 JSON document (only with resolve)
 
 ${c.dim("PUBLISHING")}
   ${c.bold("di setup")} prints the exact record to add at your DNS provider, then
@@ -707,8 +663,15 @@ ${c.dim("HOW IT WORKS")}
 `;
 
 async function main(): Promise<number> {
-  const parsed = parseCliArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const parsed = parseCliArgs(argv);
   if (!parsed.ok) {
+    const positionals = argv.filter((argument) => !argument.startsWith("-"));
+    if (positionals[0] === "resolve" && argv.includes("--json")) {
+      const document = invalidResolutionRequest(positionals[1] ?? "", parsed.error);
+      process.stdout.write(`${JSON.stringify(document)}\n`);
+      return document.exitCode;
+    }
     error(parsed.error);
     return 1;
   }
@@ -730,6 +693,8 @@ async function main(): Promise<number> {
       });
     case "verify":
       return cmdVerify(parsed.command.target);
+    case "resolve":
+      return cmdResolve(parsed.command.target);
     case "setup":
       return cmdSetup(parsed.command.target, parsed.command.packageSpec);
     case "trust_list":
