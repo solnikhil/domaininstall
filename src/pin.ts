@@ -200,6 +200,11 @@ function decodeStore(raw: string): PinStore {
 }
 
 function load(repairPermissions = true): PinStore {
+  // Read-only resolution treats a missing pin file as an absent snapshot. An
+  // empty pre-created directory (common in isolated CI fixtures) does not hold
+  // trust data, so its permissions need neither repair nor rejection. Once a
+  // pin file exists, both directory and file must pass the normal safety gates.
+  if (!repairPermissions && !existsSync(FILE)) return Object.create(null) as PinStore;
   if (existsSync(DIR)) ensureStateDir(repairPermissions);
   if (!existsSync(FILE)) return Object.create(null) as PinStore;
 
