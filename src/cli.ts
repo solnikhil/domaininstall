@@ -411,8 +411,26 @@ async function cmdResolve(target: string): Promise<number> {
   } catch (caught) {
     document = internalResolutionFailure(target, caught);
   }
-  process.stdout.write(`${JSON.stringify(document)}\n`);
+  await writeResolutionDocument(document);
   return document.exitCode;
+}
+
+let machineDocumentStarted = false;
+
+/** Await the stdout callback so a large piped document drains before exit. */
+function writeResolutionDocument(document: ResolutionDocument): Promise<void> {
+  machineDocumentStarted = true;
+  return new Promise((resolve, reject) => {
+    process.stdout.write(`${JSON.stringify(document)}\n`, (writeError) => {
+      if (writeError) reject(writeError);
+      else resolve();
+    });
+  });
+}
+
+function isJsonResolveRequest(argv: string[]): boolean {
+  const positionals = argv.filter((argument) => !argument.startsWith("-"));
+  return positionals[0] === "resolve" && argv.includes("--json");
 }
 
 /**
@@ -667,9 +685,9 @@ async function main(): Promise<number> {
   const parsed = parseCliArgs(argv);
   if (!parsed.ok) {
     const positionals = argv.filter((argument) => !argument.startsWith("-"));
-    if (positionals[0] === "resolve" && argv.includes("--json")) {
+    if (isJsonResolveRequest(argv)) {
       const document = invalidResolutionRequest(positionals[1] ?? "", parsed.error);
-      process.stdout.write(`${JSON.stringify(document)}\n`);
+      await writeResolutionDocument(document);
       return document.exitCode;
     }
     error(parsed.error);
@@ -706,9 +724,32 @@ async function main(): Promise<number> {
   }
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
+async function run(): Promise<void> {
+  try {
+    process.exitCode = await main();
+  } catch (caught) {
+    const argv = process.argv.slice(2);
+    if (isJsonResolveRequest(argv)) {
+      // If writing already began, a second document would violate the stdout
+      // contract. Otherwise preserve machine mode even for an unexpected fatal
+      // exception before command dispatch or resolution could build a result.
+      if (!machineDocumentStarted) {
+        const positionals = argv.filter((argument) => !argument.startsWith("-"));
+        const document = internalResolutionFailure(positionals[1] ?? "", caught);
+        try {
+          await writeResolutionDocument(document);
+          process.exitCode = document.exitCode;
+          return;
+        } catch {
+          // The output stream itself is unusable; no second write can repair it.
+        }
+      }
+      process.exitCode = 8;
+      return;
+    }
+    error(caught instanceof Error ? caught.message : String(caught));
+    process.exitCode = 1;
+  }
+}
+
+await run();

@@ -65,6 +65,10 @@ const table = {
     { type: 16, data: '"dnstall=pkg:npm/a"' },
     { type: 16, data: '"dnstall=pkg:npm/b"' },
   ],
+  large: Array.from({ length: 64 }, (_, index) => ({
+    type: 16,
+    data: JSON.stringify("dnstall=pkg:npm/pkg" + index + " note=" + "x".repeat(3900)),
+  })),
 };
 globalThis.fetch = async () => {
   if (mode === "nx") {
@@ -185,6 +189,39 @@ globalThis.fetch = async () => {
   });
   const conflictResolveJson = JSON.parse(conflictResolve.stdout) as { exitCode: number; mappings: { conflicts: unknown[] } };
   h.check("resolve conflict exits 5 and preserves conflicts", conflictResolve.status === 5 && conflictResolveJson.exitCode === 5 && conflictResolveJson.mappings.conflicts.length === 2);
+
+  const largeResolve = spawnSync(
+    process.execPath,
+    ["--import", mockDnsUrl, cli, "resolve", "large.example", "--json"],
+    {
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+      env: {
+        ...process.env,
+        ...(process.platform === "win32" ? { Path: gatePath, PATH: gatePath } : { PATH: gatePath }),
+        npm_execpath: "",
+        DOMAININSTALL_TEST_MARKER: marker,
+        DOMAININSTALL_STATE_DIR: join(root, "resolve-large-state"),
+        DOMAININSTALL_TEST_DNS_MODE: "large",
+      },
+    },
+  );
+  let largeResolveJson: { mappings?: { supported?: unknown[]; conflicts?: unknown[] } } | undefined;
+  try {
+    largeResolveJson = JSON.parse(largeResolve.stdout) as typeof largeResolveJson;
+  } catch {
+    /* asserted below */
+  }
+  h.check(
+    "resolve drains a complete >1 MiB JSON document through a stdout pipe",
+    largeResolve.status === 5 &&
+      largeResolve.stdout.length > 1024 * 1024 &&
+      largeResolve.stdout.startsWith("{") &&
+      largeResolve.stdout.endsWith("}\n") &&
+      largeResolve.stderr === "" &&
+      largeResolveJson?.mappings?.supported?.length === 64 &&
+      largeResolveJson.mappings.conflicts?.length === 64,
+  );
 
   const corruptResolveState = join(root, "resolve-corrupt-state");
   mkdirSync(corruptResolveState);
