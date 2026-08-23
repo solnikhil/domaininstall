@@ -18,6 +18,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -70,6 +71,7 @@ const LOCK_WAIT_MS = 5000;
 // published only after their metadata is durable, so they never need this
 // grace period.
 const MALFORMED_LOCK_GRACE_MS = 250;
+const PRIVATE_OWNER_GRACE_MS = 60_000;
 const LOCK_VERSION = 1;
 
 type PinStore = Record<string, Pin>;
@@ -325,11 +327,10 @@ function sameFile(a: { dev: number; ino: number }, b: { dev: number; ino: number
  * inspected. This prevents a delayed cleanup/release from unlinking a newer
  * owner's lock after the pathname has been reused.
  */
-function unlinkClaimedLock(observedFd: number, metadata: LockMetadata | null): boolean {
+function unlinkClaimedLock(observed: { dev: number; ino: number }, metadata: LockMetadata | null): boolean {
   const claim = join(DIR, `.pins-lock-claim-${process.pid}-${randomUUID()}.tmp`);
   try {
     linkSync(LOCK_FILE, claim);
-    const observed = fstatSync(observedFd);
     const claimed = lstatSync(claim);
     if (!sameFile(observed, claimed)) return false;
 
@@ -372,7 +373,13 @@ function removeStaleLock(): boolean {
     if (!inspected?.current && Date.now() - stat.mtimeMs < MALFORMED_LOCK_GRACE_MS) {
       return false;
     }
-    return unlinkClaimedLock(fd, inspected?.current ?? null);
+    // Node 22 on Windows does not allow an open hard-linked file to be
+    // unlinked. Retain only its stable file identity, then close before the
+    // claim-and-delete sequence.
+    const observed = { dev: stat.dev, ino: stat.ino };
+    closeSync(fd);
+    fd = undefined;
+    return unlinkClaimedLock(observed, inspected?.current ?? null);
   } catch (error) {
     if (error instanceof PinStoreError) throw error;
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
@@ -382,19 +389,42 @@ function removeStaleLock(): boolean {
   }
 }
 
+function cleanupOrphanLockFiles(): void {
+  const ownerPattern = /^\.pins-lock-([0-9a-f-]+)\.(owner|tmp)$/i;
+  for (const name of readdirSync(DIR)) {
+    const match = ownerPattern.exec(name);
+    if (!match) continue;
+    const path = join(DIR, name);
+    try {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink > 1) continue;
+      const inspected = inspectLockMetadata(readFileSync(path, "utf8"));
+      if (inspected && processIsAlive(inspected.pid)) continue;
+      if (Date.now() - stat.mtimeMs < PRIVATE_OWNER_GRACE_MS) continue;
+      // Private names contain an unguessable token and are never reused. A
+      // single-link file with a dead/missing owner cannot be the public lock.
+      unlinkSync(path);
+    } catch {
+      // Cleanup is best-effort and must never make lock acquisition less safe.
+    }
+  }
+}
+
 function acquireLock(): LockHandle {
   ensureStateDir();
+  cleanupOrphanLockFiles();
   const deadline = Date.now() + LOCK_WAIT_MS;
   while (true) {
     const token = randomUUID();
     const owner = join(DIR, `.pins-lock-${token}.owner`);
+    const building = join(DIR, `.pins-lock-${token}.tmp`);
     let ownerFd: number | undefined;
     try {
       // Construct and flush the owner privately. Publishing it with link(2)
       // is one atomic namespace operation, eliminating the empty/truncated
       // live-lock window of open(O_EXCL) followed by write.
       ownerFd = openSync(
-        owner,
+        building,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
         0o600,
       );
@@ -406,17 +436,18 @@ function acquireLock(): LockHandle {
       };
       writeFileSync(ownerFd, JSON.stringify(metadata), "utf8");
       fsyncSync(ownerFd);
+      closeSync(ownerFd);
+      ownerFd = undefined;
+      renameSync(building, owner);
       linkSync(owner, LOCK_FILE);
 
       let released = false;
-      const heldFd = ownerFd;
-      ownerFd = undefined;
       return {
         release(): void {
           if (released) return;
           released = true;
           try {
-            const held = fstatSync(heldFd);
+            const held = lstatSync(owner);
             try {
               const current = lstatSync(LOCK_FILE);
               if (sameFile(held, current)) unlinkSync(LOCK_FILE);
@@ -424,7 +455,6 @@ function acquireLock(): LockHandle {
               // Missing/replaced public lock: do not touch the replacement.
             }
           } finally {
-            closeSync(heldFd);
             try {
               unlinkSync(owner);
             } catch {
@@ -439,6 +469,11 @@ function acquireLock(): LockHandle {
         unlinkSync(owner);
       } catch {
         // Owner may not have been created.
+      }
+      try {
+        unlinkSync(building);
+      } catch {
+        // Build file may already have been promoted or removed.
       }
       if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
       if (removeStaleLock()) continue;

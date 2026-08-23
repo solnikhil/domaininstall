@@ -585,6 +585,34 @@ if (!saved.ok) process.exit(2);`,
   );
   rmSync(killedState, { recursive: true, force: true });
 
+  const orphanToken = "00000000-0000-4000-8000-000000000020";
+  const orphanOwner = join(state, `.pins-lock-${orphanToken}.owner`);
+  const orphanBuild = join(state, ".pins-lock-00000000-0000-4000-8000-000000000021.tmp");
+  writeFileSync(
+    orphanOwner,
+    JSON.stringify({
+      version: 1,
+      pid: killedOwner.pid ?? 999999,
+      token: orphanToken,
+      createdAt: new Date(Date.now() - 120_000).toISOString(),
+    }),
+    "utf8",
+  );
+  writeFileSync(orphanBuild, '{"version":1,"pid":', "utf8");
+  const oldPrivateTime = new Date(Date.now() - 120_000);
+  utimesSync(orphanOwner, oldPrivateTime, oldPrivateTime);
+  utimesSync(orphanBuild, oldPrivateTime, oldPrivateTime);
+  const afterPrivateCrash = savePin("after-private-crash.example", {
+    namespace: "npm",
+    package: "after-private-crash",
+    registry: "https://registry.npmjs.org/",
+    dnsVersion: null,
+  });
+  check(
+    "cleans crash-before-publish owner and metadata-build residue",
+    afterPrivateCrash.ok && !existsSync(orphanOwner) && !existsSync(orphanBuild),
+  );
+
   console.log("\n5. Package-manager detection + plan");
   const plan = buildInstallPlan("stripe", "^18", "https://registry.npmjs.org/");
   check("builds an npm-only install plan", plan.pm === "npm" && plan.spec === "stripe@^18");
