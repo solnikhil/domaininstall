@@ -421,7 +421,7 @@ function removeStaleLock(): boolean {
     const observed = { dev: stat.dev, ino: stat.ino };
     closeSync(fd);
     fd = undefined;
-    if (IS_WINDOWS) return removeStaleWindowsLock(observed);
+    if (IS_WINDOWS) return removeStaleWindowsLock();
     return unlinkClaimedLock(observed, inspected?.current ?? null);
   } catch (error) {
     if (error instanceof PinStoreError) throw error;
@@ -437,7 +437,7 @@ function removeStaleLock(): boolean {
  * claim exists. Serialize recovery, revalidate under that barrier, then
  * atomically rename the exact stale pathname to a unique quarantine name.
  */
-function removeStaleWindowsLock(observed: { dev: number; ino: number }): boolean {
+function removeStaleWindowsLock(): boolean {
   const barrier = acquireRecoveryBarrier();
   if (!barrier) return false;
   let fd: number | undefined;
@@ -445,9 +445,9 @@ function removeStaleWindowsLock(observed: { dev: number; ino: number }): boolean
   try {
     fd = openSync(LOCK_FILE, constants.O_RDONLY | constants.O_NOFOLLOW);
     const stat = fstatSync(fd);
-    if (!sameFile(observed, stat)) return false;
     if (!stat.isFile()) fail(`Unsafe trust-state lock at ${LOCK_FILE}.`);
-    const inspected = inspectLockMetadata(readFileSync(fd, "utf8"));
+    const raw = readFileSync(fd, "utf8");
+    const inspected = inspectLockMetadata(raw);
     if (inspected && processIsAlive(inspected.pid)) return false;
     if (!inspected?.current && Date.now() - stat.mtimeMs < MALFORMED_LOCK_GRACE_MS) return false;
     closeSync(fd);
@@ -455,9 +455,10 @@ function removeStaleWindowsLock(observed: { dev: number; ino: number }): boolean
 
     renameSync(LOCK_FILE, claim);
     const claimed = lstatSync(claim);
-    if (!sameFile(stat, claimed)) {
-      // The barrier prevents new stable publishers, but fail closed if the
-      // filesystem did not move the object we revalidated.
+    if (readFileSync(claim, "utf8") !== raw) {
+      // Windows inode values are not stable across handles on every Node 22
+      // runner/filesystem combination. The barrier plus immutable full lock
+      // payload gives us a portable instance identity instead.
       if (!existsSync(LOCK_FILE)) renameSync(claim, LOCK_FILE);
       return false;
     }
@@ -475,7 +476,8 @@ function removeStaleWindowsLock(observed: { dev: number; ino: number }): boolean
   } catch (error) {
     if (error instanceof PinStoreError) throw error;
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
-    return false;
+    const code = error instanceof Error && "code" in error ? String(error.code) : "unknown";
+    throw new PinStoreError(`Cannot recover the trust-state lock on Windows (${code}).`);
   } finally {
     if (fd !== undefined) closeSync(fd);
     barrier.release();
