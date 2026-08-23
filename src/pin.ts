@@ -73,6 +73,7 @@ const LOCK_WAIT_MS = 5000;
 // published only after their metadata is durable, so they never need this
 // grace period.
 const MALFORMED_LOCK_GRACE_MS = 250;
+const RECOVERY_BARRIER_GRACE_MS = 1000;
 const PRIVATE_OWNER_GRACE_MS = 60_000;
 const LOCK_VERSION = 1;
 
@@ -329,41 +330,135 @@ function sameFile(a: { dev: number; ino: number }, b: { dev: number; ino: number
 }
 
 function acquireRecoveryBarrier(): RecoveryBarrier | null {
+  const token = randomUUID();
+  const building = join(DIR, `.pins-lock-recovery-${process.pid}-${token}.tmp`);
+  const buildingOwner = join(building, "owner.json");
+  const metadata: LockMetadata = {
+    version: LOCK_VERSION,
+    pid: process.pid,
+    token,
+    createdAt: new Date().toISOString(),
+  };
+  const raw = JSON.stringify(metadata);
+  let ownerFd: number | undefined;
   try {
-    mkdirSync(RECOVERY_DIR, { mode: 0o700 });
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
-    return null;
-  }
-
-  const owner = join(RECOVERY_DIR, "owner.json");
-  try {
-    writeFileSync(
-      owner,
-      JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }),
-      { encoding: "utf8", mode: 0o600 },
+    mkdirSync(building, { mode: 0o700 });
+    ownerFd = openSync(
+      buildingOwner,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
     );
+    writeFileSync(ownerFd, raw, "utf8");
+    fsyncSync(ownerFd);
+    closeSync(ownerFd);
+    ownerFd = undefined;
+    renameSync(building, RECOVERY_DIR);
   } catch (error) {
+    if (ownerFd !== undefined) closeSync(ownerFd);
     try {
-      rmdirSync(RECOVERY_DIR);
+      unlinkSync(buildingOwner);
     } catch {
-      // Leave an unmistakable barrier rather than racing without one.
+      // Metadata may not have been created.
     }
+    try {
+      rmdirSync(building);
+    } catch {
+      // Private directory may already have been published.
+    }
+    if (existsSync(RECOVERY_DIR)) return null;
     throw error;
   }
 
+  const releaseClaim = join(DIR, `.pins-lock-recovery-release-${process.pid}-${token}.tmp`);
   let released = false;
   return {
     release(): void {
       if (released) return;
       released = true;
       try {
-        unlinkSync(owner);
-      } finally {
-        rmdirSync(RECOVERY_DIR);
+        renameSync(RECOVERY_DIR, releaseClaim);
+        const claimedOwner = join(releaseClaim, "owner.json");
+        if (readFileSync(claimedOwner, "utf8") !== raw) {
+          if (!existsSync(RECOVERY_DIR)) renameSync(releaseClaim, RECOVERY_DIR);
+          return;
+        }
+        unlinkSync(claimedOwner);
+        rmdirSync(releaseClaim);
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
       }
     },
   };
+}
+
+function removeStaleRecoveryBarrier(): boolean {
+  const owner = join(RECOVERY_DIR, "owner.json");
+  let raw: string | null = null;
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(RECOVERY_DIR);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      fail(`Unsafe trust-state recovery barrier at ${RECOVERY_DIR}.`);
+    }
+    try {
+      raw = readFileSync(owner, "utf8");
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    const inspected = raw === null ? null : inspectLockMetadata(raw);
+    if (inspected && processIsAlive(inspected.pid)) return false;
+    if (!inspected?.current && Date.now() - stat.mtimeMs < RECOVERY_BARRIER_GRACE_MS) return false;
+  } catch (error) {
+    if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    return false;
+  }
+
+  const claim = join(DIR, `.pins-lock-recovery-stale-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    renameSync(RECOVERY_DIR, claim);
+    const claimedOwner = join(claim, "owner.json");
+    const claimedRaw = existsSync(claimedOwner) ? readFileSync(claimedOwner, "utf8") : null;
+    if (claimedRaw !== raw) {
+      if (!existsSync(RECOVERY_DIR)) renameSync(claim, RECOVERY_DIR);
+      return false;
+    }
+    const entries = readdirSync(claim);
+    if (entries.some((entry) => entry !== "owner.json")) {
+      if (!existsSync(RECOVERY_DIR)) renameSync(claim, RECOVERY_DIR);
+      fail(`Unsafe contents in trust-state recovery barrier ${RECOVERY_DIR}.`);
+    }
+    if (claimedRaw !== null) unlinkSync(claimedOwner);
+    rmdirSync(claim);
+    return true;
+  } catch (error) {
+    if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    return false;
+  }
+}
+
+function cleanupPrivateRecoveryDirectories(): void {
+  const pattern = /^\.pins-lock-recovery-(?:(?:release|stale)-)?\d+-[0-9a-f-]+\.tmp$/i;
+  for (const name of readdirSync(DIR)) {
+    if (!pattern.test(name)) continue;
+    const path = join(DIR, name);
+    const owner = join(path, "owner.json");
+    try {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+      const raw = existsSync(owner) ? readFileSync(owner, "utf8") : null;
+      const inspected = raw === null ? null : inspectLockMetadata(raw);
+      if (inspected && processIsAlive(inspected.pid)) continue;
+      if (Date.now() - stat.mtimeMs < PRIVATE_OWNER_GRACE_MS) continue;
+      const entries = readdirSync(path);
+      if (entries.some((entry) => entry !== "owner.json")) continue;
+      if (raw !== null) unlinkSync(owner);
+      rmdirSync(path);
+    } catch {
+      // Best-effort cleanup of unpublished/quarantined recovery metadata.
+    }
+  }
 }
 
 /**
@@ -508,9 +603,11 @@ function cleanupOrphanLockFiles(): void {
 function acquireLock(): LockHandle {
   ensureStateDir();
   cleanupOrphanLockFiles();
+  if (IS_WINDOWS) cleanupPrivateRecoveryDirectories();
   const deadline = Date.now() + LOCK_WAIT_MS;
   while (true) {
     if (IS_WINDOWS && existsSync(RECOVERY_DIR)) {
+      if (removeStaleRecoveryBarrier()) continue;
       if (Date.now() >= deadline) {
         throw new PinStoreError("Timed out waiting for trust-state lock recovery to finish.");
       }

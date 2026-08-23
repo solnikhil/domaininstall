@@ -613,6 +613,60 @@ if (!saved.ok) process.exit(2);`,
     afterPrivateCrash.ok && !existsSync(orphanOwner) && !existsSync(orphanBuild),
   );
 
+  if (isWindows) {
+    const recoveryDir = join(state, ".pins-lock-recovery");
+    const barrierOwner = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const dir = join(process.env.DOMAININSTALL_STATE_DIR, ".pins-lock-recovery");
+mkdirSync(dir);
+writeFileSync(join(dir, "owner.json"), JSON.stringify({ version: 1, pid: process.pid, token: "00000000-0000-4000-8000-000000000022", createdAt: new Date().toISOString() }));
+process.stdout.write("READY\\n");
+setInterval(() => {}, 1000);`,
+      ],
+      { env: { ...process.env, DOMAININSTALL_STATE_DIR: state }, stdio: ["ignore", "pipe", "inherit"] },
+    );
+    await new Promise<void>((resolve, reject) => {
+      barrierOwner.stdout!.on("data", (chunk: Buffer) => {
+        if (chunk.toString().includes("READY")) resolve();
+      });
+      barrierOwner.on("error", reject);
+      barrierOwner.on("close", (code) => {
+        if (code !== null) reject(new Error(`recovery barrier owner exited before ready (${code})`));
+      });
+    });
+    barrierOwner.kill("SIGKILL");
+    await new Promise<void>((resolve) => barrierOwner.on("close", () => resolve()));
+    const afterBarrierKill = savePin("after-barrier-kill.example", {
+      namespace: "npm",
+      package: "after-barrier-kill",
+      registry: "https://registry.npmjs.org/",
+      dnsVersion: null,
+    });
+    check(
+      "recovers when a Windows recovery-barrier owner is killed",
+      afterBarrierKill.ok && !existsSync(recoveryDir),
+    );
+
+    mkdirSync(recoveryDir);
+    const oldBarrierTime = new Date(Date.now() - 2000);
+    utimesSync(recoveryDir, oldBarrierTime, oldBarrierTime);
+    const afterMalformedBarrier = savePin("after-malformed-barrier.example", {
+      namespace: "npm",
+      package: "after-malformed-barrier",
+      registry: "https://registry.npmjs.org/",
+      dnsVersion: null,
+    });
+    check(
+      "recovers malformed Windows recovery-barrier residue",
+      afterMalformedBarrier.ok && !existsSync(recoveryDir),
+    );
+  }
+
   console.log("\n5. Package-manager detection + plan");
   const plan = buildInstallPlan("stripe", "^18", "https://registry.npmjs.org/");
   check("builds an npm-only install plan", plan.pm === "npm" && plan.spec === "stripe@^18");
