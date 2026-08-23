@@ -518,12 +518,12 @@ export async function verifyArtifactIntegrity(path: string, integrity: string): 
 
 function resolveMetadata(
   pkg: string,
-  selector: string | undefined,
+  version: string,
   registry: string,
   cacheDir: string,
   cwd: string,
 ): ArtifactMetadataResult {
-  const spec = selector ? `${pkg}@${selector}` : pkg;
+  const spec = `${pkg}@${version}`;
   const output = runNpmCapture(
     [
       "view",
@@ -543,7 +543,18 @@ function resolveMetadata(
   return parseNpmArtifactMetadata(output.value);
 }
 
-function parsePackedFilename(stdout: string, tempDir: string): string | null {
+export interface PackedArtifactSelection {
+  version: string;
+  integrity: string;
+  tarballPath: string;
+}
+
+/** Parse npm pack's one selected artifact, never npm view's multi-version range output. */
+export function parsePackedArtifactSelection(
+  stdout: string,
+  tempDir: string,
+  expectedPackage: string,
+): PackedArtifactSelection | null {
   let value: unknown;
   try {
     value = JSON.parse(stdout) as unknown;
@@ -551,7 +562,12 @@ function parsePackedFilename(stdout: string, tempDir: string): string | null {
     return null;
   }
   if (!Array.isArray(value) || value.length !== 1 || !isPlainObject(value[0])) return null;
+  const name = value[0].name;
+  const version = value[0].version;
+  const integrity = value[0].integrity;
   const filename = value[0].filename;
+  if (name !== expectedPackage || typeof version !== "string" || !EXACT_VERSION.test(version)) return null;
+  if (typeof integrity !== "string" || parseSri(integrity).length === 0) return null;
   if (typeof filename !== "string" || filename !== basename(filename) || !filename.endsWith(".tgz")) return null;
   const candidate = resolve(tempDir, filename);
   if (dirname(candidate) !== resolve(tempDir)) return null;
@@ -561,7 +577,7 @@ function parsePackedFilename(stdout: string, tempDir: string): string | null {
   } catch {
     return null;
   }
-  return candidate;
+  return { version, integrity, tarballPath: candidate };
 }
 
 export function disposePreparedArtifact(artifact: PreparedNpmArtifact): void {
@@ -588,13 +604,14 @@ export async function prepareNpmArtifact(
   const cacheDir = join(tempDir, "npm-cache");
   let prepared: PreparedNpmArtifact | undefined;
   try {
-    const selected = resolveMetadata(pkg, selector, registry, cacheDir, cwd);
-    if (!selected.ok) return selected;
-    const identity = selected.artifact;
+    const requestedSpec = selector ? `${pkg}@${selector}` : pkg;
+    // npm pack and npm install share npm's pacote resolver. Let that resolver
+    // select one exact version directly; `npm view pkg@range ... --json` is not
+    // suitable here because it returns an array for ranges with many releases.
     const packed = runNpmCapture(
       [
         "pack",
-        `${pkg}@${identity.version}`,
+        requestedSpec,
         "--ignore-scripts",
         "--json",
         `--pack-destination=${tempDir}`,
@@ -605,10 +622,19 @@ export async function prepareNpmArtifact(
       cwd,
       120_000,
     );
-    if (!packed.ok) return { ok: false, error: `Could not download ${pkg}@${identity.version}: ${packed.error}` };
-    const tarballPath = parsePackedFilename(packed.value, tempDir);
-    if (!tarballPath) return { ok: false, error: "npm produced an invalid or oversized package archive." };
-    if (!(await verifyArtifactIntegrity(tarballPath, identity.integrity))) {
+    if (!packed.ok) return { ok: false, error: `Could not resolve and download ${requestedSpec}: ${packed.error}` };
+    const selection = parsePackedArtifactSelection(packed.value, tempDir, pkg);
+    if (!selection) return { ok: false, error: "npm produced an invalid or oversized package archive." };
+
+    // Exact-version metadata is always one object. It supplies the canonical
+    // tarball URL and registry SRI for the exact artifact npm pack selected.
+    const selected = resolveMetadata(pkg, selection.version, registry, cacheDir, cwd);
+    if (!selected.ok) return selected;
+    const identity = selected.artifact;
+    if (identity.version !== selection.version || identity.integrity !== selection.integrity) {
+      return { ok: false, error: `Registry metadata did not match npm's selected ${pkg}@${selection.version}.` };
+    }
+    if (!(await verifyArtifactIntegrity(selection.tarballPath, identity.integrity))) {
       return { ok: false, error: `Downloaded bytes for ${pkg}@${identity.version} do not match the resolved SRI.` };
     }
     prepared = {
@@ -616,7 +642,7 @@ export async function prepareNpmArtifact(
       integrity: identity.integrity,
       tarball: identity.tarball,
       resolvedAt: new Date().toISOString(),
-      tarballPath,
+      tarballPath: selection.tarballPath,
       cacheDir,
       tempDir,
     };

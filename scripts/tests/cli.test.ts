@@ -50,14 +50,28 @@ if (process.argv[2] === "view") {
   const integrity = process.env.DOMAININSTALL_MUTATE_METADATA_AFTER_FIRST === "1" && count > 0
     ? "sha512-${Buffer.alloc(64, 9).toString("base64")}"
     : ${JSON.stringify(fakeArtifactIntegrity)};
+  const viewedSpec = process.argv[3] || "";
+  if (viewedSpec.includes("@^") || viewedSpec.includes("@*")) {
+    process.stdout.write(JSON.stringify([
+      { version: "2.3.0", "dist.integrity": integrity, "dist.tarball": "https://registry.npmjs.org/safe-package/-/safe-package-2.3.0.tgz" },
+      { version: "2.4.1", "dist.integrity": integrity, "dist.tarball": "https://registry.npmjs.org/safe-package/-/safe-package-2.4.1.tgz" }
+    ]));
+    process.exit(0);
+  }
   process.stdout.write(JSON.stringify({ version: "2.4.1", "dist.integrity": integrity, "dist.tarball": "https://registry.npmjs.org/safe-package/-/safe-package-2.4.1.tgz" }));
   process.exit(0);
 }
 if (process.argv[2] === "pack") {
+  if (process.env.DOMAININSTALL_PACK_REQUEST_LOG) {
+    fs.appendFileSync(process.env.DOMAININSTALL_PACK_REQUEST_LOG, (process.argv[3] || "") + "\\n");
+  }
   const outputArg = process.argv.find((arg) => arg.startsWith("--pack-destination="));
   const output = outputArg.slice("--pack-destination=".length);
   fs.writeFileSync(path.join(output, "safe-package-2.4.1.tgz"), ${JSON.stringify(fakeArtifactBytes)});
-  process.stdout.write(JSON.stringify([{ filename: "safe-package-2.4.1.tgz" }]));
+  process.stdout.write(JSON.stringify([{
+    name: "safe-package", version: "2.4.1", integrity: ${JSON.stringify(fakeArtifactIntegrity)},
+    filename: "safe-package-2.4.1.tgz"
+  }]));
   process.exit(0);
 }
 if (process.argv[2] === "cache") process.exit(0);
@@ -229,6 +243,39 @@ globalThis.fetch = async () => {
   } else {
     h.check("install writes TOFU pin for domain", false, "pins.json missing");
   }
+
+  // npm view returns an array for ranges with several matching releases. The
+  // install path must ask npm pack to select once, then view only that exact
+  // version. This fake would return the real multi-release shape if the range
+  // were incorrectly handed to npm view.
+  if (existsSync(marker)) rmSync(marker);
+  const packRequestLog = join(root, "pack-request-log");
+  const rangeInstall = spawnSync(
+    process.execPath,
+    ["--import", mockDnsUrl, cli, "example.com@^2", "--yes"],
+    {
+      encoding: "utf8",
+      cwd: project,
+      env: {
+        ...process.env,
+        ...(process.platform === "win32" ? { Path: gatePath, PATH: gatePath } : { PATH: gatePath }),
+        npm_execpath: "",
+        DOMAININSTALL_TEST_MARKER: marker,
+        DOMAININSTALL_STATE_DIR: join(root, "range-state"),
+        DOMAININSTALL_TEST_DNS_MODE: "single",
+        DOMAININSTALL_PACK_REQUEST_LOG: packRequestLog,
+      },
+    },
+  );
+  h.check(
+    "multi-release range resolves through npm pack to one exact version",
+    rangeInstall.status === 0 &&
+      existsSync(packRequestLog) &&
+      existsSync(marker) &&
+      readFileSync(packRequestLog, "utf8").trim() === "safe-package@^2" &&
+      readFileSync(marker, "utf8").includes("safe-package@2.4.1") &&
+      rangeInstall.stdout.includes("2.4.1"),
+  );
 
   // second install same mapping ok
   if (existsSync(marker)) rmSync(marker);

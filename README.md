@@ -194,6 +194,15 @@ fetch missing transitive dependencies. Temporary artifact state is removed
 after the handoff. If a dependency needs a lifecycle script, review that step
 and run it yourself afterward — `domaininstall` won’t enable it for you.
 
+npm does not expose a supported `install --integrity=<SRI>` or install-from-file
+descriptor interface. The final handoff therefore relies on npm honoring its
+fresh isolated cache under `--prefer-offline` and enforcing the cached root SRI;
+it is not a proof that npm consumed the same filesystem pathname that
+`domaininstall` hashed. The exact selector prevents range drift, and any root
+bytes npm obtains under that cached metadata must satisfy the confirmed SRI,
+but npm may make network requests for cache misses (especially transitive
+dependencies).
+
 If your npm config routes a package’s scope to a different registry than the
 default (`@scope:registry`), `di` refuses the install instead of showing one
 registry and fetching from another. Install that package with npm directly until

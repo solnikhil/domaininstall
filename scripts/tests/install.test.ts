@@ -14,6 +14,7 @@ import {
   canonicalizeTarballUrl,
   detectNpmProject,
   npmScopeOf,
+  parsePackedArtifactSelection,
   resolveNpmLauncher,
   parseNpmArtifactMetadata,
   resolveNpmRegistry,
@@ -70,11 +71,38 @@ async function run(h: Harness): Promise<void> {
       "dist.tarball": artifact.tarball,
     })).ok,
   );
+  const multiReleaseView = JSON.stringify([
+    { version: "4.17.20", "dist.integrity": artifact.integrity, "dist.tarball": "https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz" },
+    { version: "4.17.21", "dist.integrity": artifact.integrity, "dist.tarball": artifact.tarball },
+  ]);
   h.check(
-    "metadata parser rejects arrays and unsupported integrity",
-    !parseNpmArtifactMetadata("[]").ok &&
+    "real npm-view multi-release range shape is never treated as one exact artifact",
+    !parseNpmArtifactMetadata(multiReleaseView).ok,
+  );
+  h.check(
+    "metadata parser rejects unsupported integrity",
       !parseNpmArtifactMetadata(JSON.stringify({ version: "1.0.0", "dist.integrity": "md5-bad", "dist.tarball": artifact.tarball })).ok,
   );
+  const packDir = mkdtempSync(join(tmpdir(), "dnstall-pack-selection-"));
+  const packedFile = join(packDir, "lodash-4.17.21.tgz");
+  writeFileSync(packedFile, "pack bytes");
+  const packedOutput = JSON.stringify([{
+    name: "lodash",
+    version: "4.17.21",
+    integrity: artifact.integrity,
+    filename: "lodash-4.17.21.tgz",
+    files: [{ path: "package.json", size: 10, mode: 420 }],
+  }]);
+  const packedSelection = parsePackedArtifactSelection(packedOutput, packDir, "lodash");
+  h.check(
+    "npm pack range result supplies one exact selected artifact",
+    packedSelection?.version === "4.17.21" && packedSelection.tarballPath === packedFile,
+  );
+  h.check(
+    "npm pack selection rejects a package-subject mismatch",
+    parsePackedArtifactSelection(packedOutput, packDir, "other-package") === null,
+  );
+  rmSync(packDir, { recursive: true, force: true });
   h.check(
     "tarball URL rejects credentials, HTTP, query, and fragment",
     canonicalizeTarballUrl("http://registry.example/pkg.tgz") === null &&

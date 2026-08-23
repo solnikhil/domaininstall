@@ -480,7 +480,14 @@ export function diffPin(
     next.resolvedVersion !== undefined &&
     existing.resolvedVersion !== null &&
     existing.resolvedVersion === next.resolvedVersion;
+  const sameArtifactSubject =
+    existing.namespace === next.namespace &&
+    existing.package === next.package &&
+    existingRegistry !== null &&
+    nextRegistry !== null &&
+    existingRegistry === nextRegistry;
   const blockedArtifactMutation =
+    sameArtifactSubject &&
     sameKnownVersion &&
     ((next.integrity !== undefined && existing.integrity !== next.integrity) ||
       (next.tarball !== undefined && existing.tarball !== next.tarball));

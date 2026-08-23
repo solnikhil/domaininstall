@@ -54,6 +54,10 @@ These controls narrow execution risk. They do **not** make the selected package
 trustworthy. They bind the root artifact reviewed in this invocation, not the
 complete transitive dependency graph. npm still resolves and fetches missing
 transitive dependencies, and first use still trusts the registry response.
+Because npm has no supported install-time integrity argument, the last handoff
+uses an isolated fresh cache with `--prefer-offline` and relies on npm's own SRI
+enforcement. This is not a proof that npm read the exact temporary pathname
+that `domaininstall` hashed, and cache misses can still cause network requests.
 
 ### Trust store notes by platform
 

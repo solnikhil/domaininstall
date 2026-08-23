@@ -162,6 +162,43 @@ async function run(h: Harness): Promise<void> {
   );
   const movedTarball = diffPin(artifactDomain, { ...base, ...artifact, tarball: "https://cdn.example/pkg-a-2.4.1.tgz" });
   h.check("same-version canonical tarball replacement is a hard block", movedTarball.blockedArtifactMutation);
+  const changedSubjectIntegrity = `sha512-${Buffer.alloc(64, 11).toString("base64")}`;
+  const packageSubjectChange = diffPin(artifactDomain, {
+    ...base,
+    ...artifact,
+    package: "pkg-b",
+    integrity: changedSubjectIntegrity,
+    tarball: "https://registry.npmjs.org/pkg-b/-/pkg-b-2.4.1.tgz",
+  });
+  h.check(
+    "same version on a different package subject follows manual review, not mutation hard-block",
+    !packageSubjectChange.blockedArtifactMutation &&
+      packageSubjectChange.changes.some((change) => change.field === "package") &&
+      packageSubjectChange.changes.some((change) => change.field === "integrity"),
+  );
+  const registrySubjectChange = diffPin(artifactDomain, {
+    ...base,
+    ...artifact,
+    registry: "https://packages.example/",
+    integrity: changedSubjectIntegrity,
+    tarball: "https://packages.example/pkg-a/-/pkg-a-2.4.1.tgz",
+  });
+  h.check(
+    "same version on a different registry follows manual review, not mutation hard-block",
+    !registrySubjectChange.blockedArtifactMutation &&
+      registrySubjectChange.changes.some((change) => change.field === "registry"),
+  );
+  const namespaceSubjectChange = diffPin(artifactDomain, {
+    ...base,
+    ...artifact,
+    namespace: "other",
+    integrity: changedSubjectIntegrity,
+  });
+  h.check(
+    "same version in a different namespace follows manual review, not mutation hard-block",
+    !namespaceSubjectChange.blockedArtifactMutation &&
+      namespaceSubjectChange.changes.some((change) => change.field === "namespace"),
+  );
   h.check(
     "rejects partial artifact identities",
     !savePin("partial.example", { ...base, resolvedVersion: "1.0.0" }).ok,

@@ -7,7 +7,7 @@
  * everything deterministic lives in scripts/test.ts.
  *
  * Phases:
- *   1. project-scoped install  → node_modules/<package> in a temp project
+ *   1. project-scoped range install → npm selects one exact version, then node_modules/<package>
  *   2. TOFU pin               → schema, mapping, and registry recorded
  *   3. global install         → <prefix>/{lib/,}node_modules/<package>
  *   4. pin continuity         → second install matches, firstSeen preserved
@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 
 const domain = process.env.DOMAININSTALL_E2E_DOMAIN || "zuraai.xyz";
 const expectedPackage = process.env.DOMAININSTALL_E2E_PACKAGE || "zuraai";
+const range = process.env.DOMAININSTALL_E2E_RANGE || "*";
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 
 const IS_WINDOWS = process.platform === "win32";
@@ -118,8 +119,8 @@ async function main(): Promise<void> {
       JSON.stringify({ name: "domaininstall-e2e", version: "1.0.0", private: true }),
     );
 
-    step(`project-scoped install: di ${domain} --yes`);
-    const installCode = await run([domain, "--yes"], project, state);
+    step(`project-scoped range install: di ${domain}@${range} --yes`);
+    const installCode = await run([`${domain}@${range}`, "--yes"], project, state);
     if (installCode !== 0) throw new Error(`di exited with code ${installCode}`);
 
     if (!existsSync(join(project, "node_modules", expectedPackage))) {

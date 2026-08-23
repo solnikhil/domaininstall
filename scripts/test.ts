@@ -762,7 +762,10 @@ if (process.argv[2] === "pack") {
   const outputArg = process.argv.find((arg) => arg.startsWith("--pack-destination="));
   const output = outputArg.slice("--pack-destination=".length);
   fs.writeFileSync(path.join(output, "safe-package-1.2.3.tgz"), ${JSON.stringify(fakeArtifactBytes)});
-  process.stdout.write(JSON.stringify([{ filename: "safe-package-1.2.3.tgz" }]));
+  process.stdout.write(JSON.stringify([{
+    name: "safe-package", version: "1.2.3", integrity: ${JSON.stringify(fakeArtifactIntegrity)},
+    filename: "safe-package-1.2.3.tgz"
+  }]));
   process.exit(0);
 }
 if (process.argv[2] === "cache") process.exit(0);
