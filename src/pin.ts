@@ -20,6 +20,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -63,6 +64,7 @@ const IS_WINDOWS = process.platform === "win32";
 const DIR = process.env.DOMAININSTALL_STATE_DIR || join(homedir(), ".domaininstall");
 const FILE = join(DIR, "pins.json");
 const LOCK_FILE = join(DIR, "pins.lock");
+const RECOVERY_DIR = join(DIR, ".pins-lock-recovery");
 const STORE_VERSION = 1;
 const LOCK_WAIT_MS = 5000;
 // A lock created by older releases was visible before its metadata was
@@ -283,6 +285,10 @@ interface LockHandle {
   release(): void;
 }
 
+interface RecoveryBarrier {
+  release(): void;
+}
+
 interface InspectedLockMetadata {
   pid: number;
   current: LockMetadata | null;
@@ -320,6 +326,44 @@ function inspectLockMetadata(raw: string): InspectedLockMetadata | null {
 
 function sameFile(a: { dev: number; ino: number }, b: { dev: number; ino: number }): boolean {
   return a.dev === b.dev && a.ino === b.ino;
+}
+
+function acquireRecoveryBarrier(): RecoveryBarrier | null {
+  try {
+    mkdirSync(RECOVERY_DIR, { mode: 0o700 });
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+    return null;
+  }
+
+  const owner = join(RECOVERY_DIR, "owner.json");
+  try {
+    writeFileSync(
+      owner,
+      JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }),
+      { encoding: "utf8", mode: 0o600 },
+    );
+  } catch (error) {
+    try {
+      rmdirSync(RECOVERY_DIR);
+    } catch {
+      // Leave an unmistakable barrier rather than racing without one.
+    }
+    throw error;
+  }
+
+  let released = false;
+  return {
+    release(): void {
+      if (released) return;
+      released = true;
+      try {
+        unlinkSync(owner);
+      } finally {
+        rmdirSync(RECOVERY_DIR);
+      }
+    },
+  };
 }
 
 /**
@@ -373,12 +417,11 @@ function removeStaleLock(): boolean {
     if (!inspected?.current && Date.now() - stat.mtimeMs < MALFORMED_LOCK_GRACE_MS) {
       return false;
     }
-    // Node 22 on Windows does not allow an open hard-linked file to be
-    // unlinked. Retain only its stable file identity, then close before the
-    // claim-and-delete sequence.
+    // Retain only stable identity before closing the inspection handle.
     const observed = { dev: stat.dev, ino: stat.ino };
     closeSync(fd);
     fd = undefined;
+    if (IS_WINDOWS) return removeStaleWindowsLock(observed);
     return unlinkClaimedLock(observed, inspected?.current ?? null);
   } catch (error) {
     if (error instanceof PinStoreError) throw error;
@@ -386,6 +429,56 @@ function removeStaleLock(): boolean {
     return false;
   } finally {
     if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * Windows Node 22 cannot reliably unlink the public name while a hard-link
+ * claim exists. Serialize recovery, revalidate under that barrier, then
+ * atomically rename the exact stale pathname to a unique quarantine name.
+ */
+function removeStaleWindowsLock(observed: { dev: number; ino: number }): boolean {
+  const barrier = acquireRecoveryBarrier();
+  if (!barrier) return false;
+  let fd: number | undefined;
+  const claim = join(DIR, `.pins-lock-claim-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    fd = openSync(LOCK_FILE, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(fd);
+    if (!sameFile(observed, stat)) return false;
+    if (!stat.isFile()) fail(`Unsafe trust-state lock at ${LOCK_FILE}.`);
+    const inspected = inspectLockMetadata(readFileSync(fd, "utf8"));
+    if (inspected && processIsAlive(inspected.pid)) return false;
+    if (!inspected?.current && Date.now() - stat.mtimeMs < MALFORMED_LOCK_GRACE_MS) return false;
+    closeSync(fd);
+    fd = undefined;
+
+    renameSync(LOCK_FILE, claim);
+    const claimed = lstatSync(claim);
+    if (!sameFile(stat, claimed)) {
+      // The barrier prevents new stable publishers, but fail closed if the
+      // filesystem did not move the object we revalidated.
+      if (!existsSync(LOCK_FILE)) renameSync(claim, LOCK_FILE);
+      return false;
+    }
+
+    if (inspected?.current) {
+      const owner = join(DIR, `.pins-lock-${inspected.current.token}.owner`);
+      try {
+        if (sameFile(claimed, lstatSync(owner))) unlinkSync(owner);
+      } catch {
+        // A crashed owner may already have lost its private name.
+      }
+    }
+    unlinkSync(claim);
+    return true;
+  } catch (error) {
+    if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    barrier.release();
   }
 }
 
@@ -415,6 +508,13 @@ function acquireLock(): LockHandle {
   cleanupOrphanLockFiles();
   const deadline = Date.now() + LOCK_WAIT_MS;
   while (true) {
+    if (IS_WINDOWS && existsSync(RECOVERY_DIR)) {
+      if (Date.now() >= deadline) {
+        throw new PinStoreError("Timed out waiting for trust-state lock recovery to finish.");
+      }
+      Atomics.wait(sleeper, 0, 0, 25);
+      continue;
+    }
     const token = randomUUID();
     const owner = join(DIR, `.pins-lock-${token}.owner`);
     const building = join(DIR, `.pins-lock-${token}.tmp`);
@@ -442,7 +542,7 @@ function acquireLock(): LockHandle {
       linkSync(owner, LOCK_FILE);
 
       let released = false;
-      return {
+      const handle: LockHandle = {
         release(): void {
           if (released) return;
           released = true;
@@ -463,6 +563,15 @@ function acquireLock(): LockHandle {
           }
         },
       };
+      // Close the check/publish race with Windows recovery: a publisher that
+      // overlapped barrier creation withdraws its lock and retries after the
+      // recovery owner finishes.
+      if (IS_WINDOWS && existsSync(RECOVERY_DIR)) {
+        handle.release();
+        Atomics.wait(sleeper, 0, 0, 25);
+        continue;
+      }
+      return handle;
     } catch (error) {
       if (ownerFd !== undefined) closeSync(ownerFd);
       try {
