@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "remotion studio",
     "audio": "node scripts/generate-audio.mjs",
+    "test": "npm run typecheck && npm run test:claims",
+    "test:claims": "npm --prefix .. run test:claims",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "render": "remotion render DomainInstall out/domaininstall.mp4 --crf=16",
     "render:demo": "remotion render DomainInstall domaininstall-demo.mp4 --crf=16",

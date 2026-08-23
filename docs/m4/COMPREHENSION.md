@@ -11,9 +11,18 @@
 Administer **after** both of the following, in order:
 
 1. **README skim** — participant spends ~2–5 minutes on the project README (or a printed excerpt of “Why this exists,” “What is remembered,” and “What it does not promise”).
-2. **One verify exposure** — either:
-   - live: `di verify zuraai.xyz` (or another live mapping), **or**
-   - mock preview card (same style as Gate 4 treatment materials).
+2. **One revised claim exposure** — use one of these equivalent treatments and
+   record which one was shown:
+   - live: `di verify zuraai.xyz` (or another live mapping), including the final
+     declaration/safety boundary line;
+   - demo: pause the Verify panel after “Declaration found” long enough for the
+     participant to read the full boundary line; or
+   - mock: a still of that same revised Verify panel, without extra coaching.
+
+The qualifying line must communicate all three boundaries: the tool checks the
+domain→package declaration and continuity, it does not establish package safety,
+and it does not establish publisher identity. Do not use the pre-revision demo
+with “AUTHENTIC,” “TYPOSQUAT,” or an unqualified “Verified” verdict.
 
 Do **not** administer before any exposure (that measures prior belief, not tool communication).  
 Do **not** coach answers. Clarifying “what the words mean” is OK; teaching the answer key is not.
@@ -185,7 +194,8 @@ Report mean number correct out of 7 for doc quality. **Do not** use “≥80% of
 3. [ ] Instrument without answer key  
 4. [ ] Score critical set blind to whether you “like” the participant  
 5. [ ] If fail → debrief script below; optionally point to SECURITY.md  
-6. [ ] Log: participant id, exposure type (live/mock), C1–C7, comprehend y/n  
+6. [ ] Log: participant id, exposure type (live/demo/mock), C1–C7, comprehend y/n
+7. [ ] Log the tested commit/version and confirm the revised claim boundary was visible
 
 ### Drop / exclude
 
@@ -219,3 +229,8 @@ Use a calm, non-shaming tone. Goal: correct the mental model, not “gotcha.”
 ## 8. If the gate fails
 
 Per ROADMAP: do **not** expand the CLI on the assumption users understand the narrow claim. Prioritize copy changes (README, CLI preview, SECURITY.md), then re-run the instrument with a **new** cohort (or clearly marked retest after substantial doc revision). Log both attempts in `RESULTS.md`.
+
+Automated content guards and synthetic respondents are useful QA, but they are
+not participants and never count toward the denominator. If revised copy ships
+before a new cohort is recruited, record zero valid completers and an
+**Incomplete** outcome rather than inferring comprehension from the copy review.

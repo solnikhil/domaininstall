@@ -44,7 +44,7 @@ type Cue = {
 const CUES: Cue[] = [
   // 01 · the deck — over the intro, before the kick comes in
   {at: on("hook", 1), file: AUDIO.settle, volume: 0.5, hold: 40, note: "cards dealt"},
-  {at: on("hook", 3), file: AUDIO.flag, volume: 0.42, hold: 40, note: "typosquats flagged", duck: 26},
+  {at: on("hook", 3), file: AUDIO.flag, volume: 0.42, hold: 40, note: "declaration shown", duck: 26},
 
   // 02 · the inscription — the kick and sub enter on this downbeat
   {at: on("record", -0.5), file: AUDIO.glide, volume: 0.5, hold: 40, note: "transition"},
@@ -54,7 +54,7 @@ const CUES: Cue[] = [
   {at: on("verify", -0.5), file: AUDIO.glide, volume: 0.5, hold: 40, note: "transition"},
   {at: on("verify", 1.5), file: AUDIO.flip, volume: 0.42, hold: 16, note: "dnssec"},
   {at: on("verify", 2), file: AUDIO.flip, volume: 0.38, hold: 16, note: "read-only"},
-  {at: on("verify", 3), file: AUDIO.resolve, volume: 0.5, hold: 42, note: "verified", duck: 30},
+  {at: on("verify", 3), file: AUDIO.resolve, volume: 0.5, hold: 42, note: "declaration found", duck: 30},
 
   // 04 · the spine — beat 7 is the drop in the track: drums out, then impact
   {at: on("install", -0.5), file: AUDIO.glide, volume: 0.5, hold: 40, note: "transition"},

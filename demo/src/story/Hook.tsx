@@ -17,6 +17,7 @@ import {
   tilt,
 } from "../design";
 import {Card, Headline, Text, Tick} from "../components/primitives";
+import {DEMO_CLAIM_COPY} from "../claim-copy";
 
 /* The three names differ by exactly one character. `bad` marks which one. */
 const CANDIDATES = [
@@ -70,7 +71,7 @@ const NameLine: React.FC<{name: string; bad: number; reveal: number; pulse: numb
   </div>
 );
 
-const Badge: React.FC<{show: number; real: boolean}> = ({show, real}) => (
+const Badge: React.FC<{show: number; declared: boolean}> = ({show, declared}) => (
   <div
     style={{
       display: "inline-flex",
@@ -83,20 +84,20 @@ const Badge: React.FC<{show: number; real: boolean}> = ({show, real}) => (
       fontSize: 15,
       fontWeight: 700,
       letterSpacing: 2.2,
-      color: real ? hue.green : hue.red,
-      background: real ? hue.greenSoft : hue.redSoft,
-      border: `1px solid ${real ? "#bfe9d5" : "#ffd2dc"}`,
+      color: declared ? hue.green : hue.red,
+      background: declared ? hue.greenSoft : hue.redSoft,
+      border: `1px solid ${declared ? "#bfe9d5" : "#ffd2dc"}`,
       opacity: show,
       translate: `0 ${(1 - show) * 14}px`,
       scale: settle(show, 0.94),
     }}
   >
-    {real ? (
+    {declared ? (
       <Tick size={17} progress={show} />
     ) : (
       <span style={{width: 9, height: 9, borderRadius: "50%", background: hue.red}} />
     )}
-    {real ? "AUTHENTIC" : "TYPOSQUAT"}
+    {declared ? DEMO_CLAIM_COPY.hook.declaredBadge : DEMO_CLAIM_COPY.hook.otherBadge}
   </div>
 );
 
@@ -108,14 +109,10 @@ export const Hook: React.FC<{frame: number}> = ({frame}) => {
   return (
     <AbsoluteFill style={{...SAFE, alignItems: "center", justifyContent: "center", gap: 62}}>
       <Headline
-        words={[
-          {text: "Which"},
-          {text: "one"},
-          {text: "is"},
-          {text: "the"},
-          {text: "real", color: hue.blue},
-          {text: "package?"},
-        ]}
+        words={DEMO_CLAIM_COPY.hook.headline.map((text, index) => ({
+          text,
+          color: index === DEMO_CLAIM_COPY.hook.headline.length - 1 ? hue.blue : undefined,
+        }))}
         progressOf={(index) => cue(frame, index * 4, 20)}
       />
 
@@ -135,9 +132,9 @@ export const Hook: React.FC<{frame: number}> = ({frame}) => {
       >
         {CANDIDATES.map((candidate, index) => {
           const enter = cue(frame, CARDS_AT + index * 6, 20);
-          const real = candidate.bad < 0;
-          const lift = real ? reveal * 22 : reveal * -8;
-          const fade = real ? 1 : interpolate(reveal, [0, 1], [1, 0.68], CLAMP);
+          const declared = candidate.bad < 0;
+          const lift = declared ? reveal * 22 : reveal * -8;
+          const fade = declared ? 1 : interpolate(reveal, [0, 1], [1, 0.68], CLAMP);
           return (
             <Card
               key={candidate.name}
@@ -148,21 +145,21 @@ export const Hook: React.FC<{frame: number}> = ({frame}) => {
                 opacity: enter * fade,
                 transform: [
                   `translateY(${(1 - enter) * 80 - lift}px)`,
-                  `rotateX(${(1 - enter) * -16 + (real ? 0 : reveal * 7)}deg)`,
-                  `scale(${settle(enter, 0.94) * (real ? 1 + reveal * 0.03 : 1 - reveal * 0.03)})`,
+                  `rotateX(${(1 - enter) * -16 + (declared ? 0 : reveal * 7)}deg)`,
+                  `scale(${settle(enter, 0.94) * (declared ? 1 + reveal * 0.03 : 1 - reveal * 0.03)})`,
                 ].join(" "),
                 filter: enter > 0.995 ? "none" : `blur(${(1 - enter) * 8}px)`,
-                borderColor: real
+                borderColor: declared
                   ? `rgba(47,102,255,${0.12 + reveal * 0.45})`
                   : `rgba(225,29,72,${reveal * 0.35})`,
-                boxShadow: real
+                boxShadow: declared
                   ? `${shadow.card}${reveal > 0 ? `, 0 0 0 ${reveal * 5}px rgba(47,102,255,0.09)` : ""}`
                   : shadow.card,
               }}
             >
               <NameLine name={candidate.name} bad={candidate.bad} reveal={reveal} pulse={pulse} />
               <div style={{marginTop: 26, height: 40}}>
-                <Badge show={cue(frame, BADGE_AT + index * 3, 14)} real={real} />
+                <Badge show={cue(frame, BADGE_AT + index * 3, 14)} declared={declared} />
               </div>
             </Card>
           );
@@ -191,7 +188,7 @@ export const Hook: React.FC<{frame: number}> = ({frame}) => {
           color={ink[500]}
           style={{...tilt(cue(frame, CAPTION_AT, 18), -10, 24), textAlign: "center"}}
         >
-          One character off is a different package.
+          {DEMO_CLAIM_COPY.hook.caption}
         </Text>
       </div>
     </AbsoluteFill>
