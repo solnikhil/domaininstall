@@ -34,12 +34,16 @@ import {
 import {
   detectNpmProject,
   buildInstallPlan,
+  disposePreparedArtifact,
   assertEffectiveRegistryUnchanged,
   npmScopeOf,
   resolveEffectiveRegistry,
   resolveNpmGlobalPrefix,
   resolveNpmRegistry,
+  prepareNpmArtifact,
+  recheckAndSeedNpmArtifact,
   runInstall,
+  type NpmArtifactIdentity,
 } from "./install.js";
 import { c, ce, info, detail, warn, error, success, confirm } from "./ui.js";
 import { sanitizeTerminalText } from "./terminal.js";
@@ -168,18 +172,24 @@ function printResolverAttempts(attempts: DnsAttempt[]): void {
   }
 }
 
-function printSummary(r: Resolved, commandDisplay: string, target: string, registry: string): void {
+function printSummary(
+  r: Resolved,
+  artifact: NpmArtifactIdentity,
+  commandDisplay: string,
+  target: string,
+  registry: string,
+): void {
   info("");
   info(`  ${c.dim("domain")}    ${c.bold(r.domain)}   ${dnssecBadge(r.authenticated)}`);
   if (r.provider) {
     info(`  ${c.dim("resolver")}  ${c.dim(resolverName(r.provider))}`);
   }
   info(`  ${c.dim("package")}   ${c.bold(r.record.package)}`);
-  info(
-    `  ${c.dim("version")}   ${r.version ? c.bold(r.version) : c.dim("latest")}` +
-      (r.cliVersion ? c.dim("  (CLI override)") : ""),
-  );
+  info(`  ${c.dim("version")}   ${c.bold(artifact.version)}${c.dim("  (exact registry resolution)")}`);
   info(`  ${c.dim("DNS policy")} ${r.record.version ? c.bold(r.record.version) : c.dim("latest")}`);
+  if (r.cliVersion) info(`  ${c.dim("CLI policy")} ${c.bold(r.cliVersion)}`);
+  info(`  ${c.dim("integrity")} ${c.dim(artifact.integrity)}`);
+  info(`  ${c.dim("tarball")}   ${c.dim(artifact.tarball)}`);
   info(`  ${c.dim("registry")}  ${c.dim(registry)}`);
   info(`  ${c.dim("scripts")}   ${c.bold("disabled")}`);
   info(`  ${c.dim("into")}      ${sanitizeTerminalText(target)}`);
@@ -258,69 +268,101 @@ async function cmdInstall(target: string, opts: { yes: boolean; global: boolean 
   }
   const registry = registryResult.registry;
 
-  const plan = buildInstallPlan(r.record.package, r.version, registry, { global: opts.global });
-
-  printSummary(r, plan.display, installTargetDescription(opts.global), registry);
-
-  // TOFU pin check — the domain-hijack defense.
-  const pinNext = {
-    namespace: r.record.namespace,
-    package: r.record.package,
-    registry,
-    dnsVersion: r.record.version ?? null,
-  };
-  const { existing, changes } = diffPin(r.domain, pinNext);
-
-  let requireInteractive = false;
-  if (changes.length > 0) {
-    printPinWarning(changes);
-    requireInteractive = true; // never auto-approve a changed mapping
-  } else if (existing) {
-    info(c.dim(`  ✓ matches the pin first seen ${existing.firstSeen.slice(0, 10)}`));
-    info("");
-  }
-
-  if (opts.yes && !requireInteractive) {
-    info(c.dim("  --yes: skipping confirmation"));
-  } else {
-    if (opts.yes && requireInteractive) warn("Ignoring --yes because the mapping changed; confirm manually.");
-    const proceed = await confirm(`Install ${c.bold(plan.spec)} from ${c.bold(r.domain)}?`);
-    if (!proceed) {
-      info(c.dim("Aborted."));
-      return 130;
-    }
-  }
-
-  // Close local config TOCTOU: @scope:registry can change after preview/confirm.
-  const registryRecheck = assertEffectiveRegistryUnchanged(r.record.package, registry);
-  if (!registryRecheck.ok) {
-    error(registryRecheck.error);
+  info(c.dim(`  Resolving and verifying ${r.record.package}${r.version ? `@${r.version}` : "@latest"} ...`));
+  const prepared = await prepareNpmArtifact(r.record.package, r.version, registry);
+  if (!prepared.ok) {
+    error(prepared.error);
     return 1;
   }
+  const artifact = prepared.artifact;
+  try {
+    const plan = buildInstallPlan(r.record.package, artifact, registry, { global: opts.global });
 
-  const code = await runInstall(plan);
-  if (code === 0) {
-    // CAS under lock: refuse to overwrite if another process changed the pin mid-install.
-    const saved = savePin(r.domain, pinNext, existing);
-    if (!saved.ok) {
-      error(saved.message);
-      if (saved.changes && saved.changes.length > 0) {
-        for (const ch of saved.changes) {
-          detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
-        }
-      }
-      detail(
-        ce.dim(
-          `  ${plan.spec} was installed, but the trust pin was not updated. Run di verify ${r.domain}.`,
-        ),
+    printSummary(r, artifact, plan.display, installTargetDescription(opts.global), registry);
+
+    // TOFU pin check — the domain-hijack and artifact-continuity defense.
+    const pinNext = {
+      namespace: r.record.namespace,
+      package: r.record.package,
+      registry,
+      dnsVersion: r.record.version ?? null,
+      resolvedVersion: artifact.version,
+      integrity: artifact.integrity,
+      tarball: artifact.tarball,
+      resolvedAt: artifact.resolvedAt,
+    };
+    const { existing, changes, blockedArtifactMutation } = diffPin(r.domain, pinNext);
+
+    if (blockedArtifactMutation) {
+      printPinWarning(changes);
+      error(
+        `The registry changed the integrity or tarball for already-pinned ${plan.spec}. ` +
+          "A same-version artifact mutation is never confirmable; installation is refused.",
       );
       return 1;
     }
-    success(`Installed ${plan.spec} from ${r.domain}`);
-  } else {
-    error(`Install failed (${plan.pm} exited with code ${code}).`);
+
+    let requireInteractive = false;
+    if (changes.length > 0) {
+      printPinWarning(changes);
+      requireInteractive = true; // never auto-approve a changed mapping or artifact
+    } else if (existing) {
+      info(c.dim(`  ✓ matches the pin first seen ${existing.firstSeen.slice(0, 10)}`));
+      info("");
+    }
+
+    if (opts.yes && !requireInteractive) {
+      info(c.dim("  --yes: skipping confirmation"));
+    } else {
+      if (opts.yes && requireInteractive) {
+        warn("Ignoring --yes because the mapping, policy, or resolved artifact changed; confirm manually.");
+      }
+      const proceed = await confirm(`Install ${c.bold(plan.spec)} from ${c.bold(r.domain)}?`);
+      if (!proceed) {
+        info(c.dim("Aborted."));
+        return 130;
+      }
+    }
+
+    // Close local config TOCTOU: @scope:registry can change after preview/confirm.
+    const registryRecheck = assertEffectiveRegistryUnchanged(r.record.package, registry);
+    if (!registryRecheck.ok) {
+      error(registryRecheck.error);
+      return 1;
+    }
+
+    const artifactRecheck = await recheckAndSeedNpmArtifact(r.record.package, artifact, registry);
+    if (!artifactRecheck.ok) {
+      error(artifactRecheck.error);
+      return 1;
+    }
+
+    const code = await runInstall(plan);
+    if (code === 0) {
+      // CAS under lock: refuse to overwrite if another process changed the pin mid-install.
+      const saved = savePin(r.domain, pinNext, existing);
+      if (!saved.ok) {
+        error(saved.message);
+        if (saved.changes && saved.changes.length > 0) {
+          for (const ch of saved.changes) {
+            detail(`    ${ch.field}: ${ce.red(ch.was)} ${ce.dim("→")} ${ce.yellow(ch.now)}`);
+          }
+        }
+        detail(
+          ce.dim(
+            `  ${plan.spec} was installed, but the trust pin was not updated. Run di verify ${r.domain}.`,
+          ),
+        );
+        return 1;
+      }
+      success(`Installed ${plan.spec} from ${r.domain}`);
+    } else {
+      error(`Install failed (${plan.pm} exited with code ${code}).`);
+    }
+    return code;
+  } finally {
+    disposePreparedArtifact(artifact);
   }
-  return code;
 }
 
 async function cmdVerify(target: string): Promise<number> {
@@ -426,6 +468,9 @@ async function cmdVerify(target: string): Promise<number> {
     info(c.dim(`  pin: first seen ${pin.firstSeen.slice(0, 10)} → ${pin.package} (${pin.namespace})`));
     info(c.dim(`  pin DNS policy: ${pin.dnsVersion ?? "latest"}`));
     info(c.dim(`  pin registry: ${pin.registry}`));
+    info(c.dim(`  pin artifact: ${pin.resolvedVersion ?? "unknown (legacy pin)"}`));
+    info(c.dim(`  pin integrity: ${pin.integrity ?? "unknown (legacy pin)"}`));
+    if (pin.tarball) info(c.dim(`  pin tarball: ${pin.tarball}`));
 
     const pinNext = {
       namespace: supportedRecord.namespace,
@@ -527,6 +572,7 @@ function cmdTrustList(): number {
     domain: sanitizeTerminalText(pin.domain),
     package: sanitizeTerminalText(pin.package),
     policy: pin.dnsVersion === null ? "latest" : sanitizeTerminalText(pin.dnsVersion),
+    artifact: pin.resolvedVersion === null ? "unknown" : sanitizeTerminalText(pin.resolvedVersion),
     lastSeen: pin.lastSeen.slice(0, 10),
   }));
   // Pad to the widest value so the output stays scannable, but never let one
@@ -536,6 +582,7 @@ function cmdTrustList(): number {
   const domainWidth = width([...rows.map((row) => row.domain), "domain"], 40);
   const packageWidth = width([...rows.map((row) => row.package), "package"], 32);
   const policyWidth = width([...rows.map((row) => row.policy), "policy"], 12);
+  const artifactWidth = width([...rows.map((row) => row.artifact), "artifact"], 20);
   const clip = (value: string, max: number): string =>
     value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
 
@@ -546,16 +593,17 @@ function cmdTrustList(): number {
     "  " +
       c.dim(
         `${"domain".padEnd(domainWidth)}  ${"package".padEnd(packageWidth)}  ` +
-          `${"policy".padEnd(policyWidth)}  last seen`,
+          `${"policy".padEnd(policyWidth)}  ${"artifact".padEnd(artifactWidth)}  last seen`,
       ),
   );
   for (const row of rows) {
     const domain = clip(row.domain, domainWidth);
     const packageName = clip(row.package, packageWidth);
     const policy = clip(row.policy, policyWidth);
+    const artifact = clip(row.artifact, artifactWidth);
     info(
       `  ${domain.padEnd(domainWidth)}  ${packageName.padEnd(packageWidth)}  ` +
-        `${policy.padEnd(policyWidth)}  ${row.lastSeen}`,
+        `${policy.padEnd(policyWidth)}  ${artifact.padEnd(artifactWidth)}  ${row.lastSeen}`,
     );
   }
   info("");
@@ -590,6 +638,8 @@ async function cmdTrustForget(domainInput: string, force: boolean): Promise<numb
   info(`  ${c.dim("package")}    ${c.bold(sanitizeTerminalText(existing.package))}`);
   info(`  ${c.dim("policy")}     ${existing.dnsVersion === null ? c.dim("latest") : sanitizeTerminalText(existing.dnsVersion)}`);
   info(`  ${c.dim("registry")}   ${sanitizeTerminalText(existing.registry)}`);
+  info(`  ${c.dim("artifact")}   ${existing.resolvedVersion ?? "unknown (legacy pin)"}`);
+  info(`  ${c.dim("integrity")}  ${existing.integrity ?? "unknown (legacy pin)"}`);
   info(`  ${c.dim("first seen")} ${existing.firstSeen.slice(0, 10)}`);
   info("");
 
@@ -685,7 +735,7 @@ ${c.dim("EXAMPLES")}
   di trust forget stripe.com         drop one mapping, keeping the rest
 
 ${c.dim("OPTIONS")}
-  -y, --yes        skip confirmation when the pin is unchanged (not a review of first use)
+  -y, --yes        skip confirmation only when the mapping and artifact pin are unchanged
   -g, --global     install globally (npm install --global)
   -h, --help       show this help
   -V, --version    show version
@@ -699,11 +749,12 @@ ${c.dim("HOW IT WORKS")}
   The domain owner publishes a TXT record:
     _dnstall.<domain>  TXT  "dnstall=pkg:npm/<package>"
   domaininstall resolves it over DNS-over-HTTPS, shows you exactly what will be
-  installed, remembers the mapping (trust-on-first-use), and hands off to your
-  npm with lifecycle scripts disabled. It never executes text from the DNS record.
-  First use has nothing to compare against; --yes skips the prompt only when the
-  remembered pin still matches. DNSSEC lines report the resolver AD bit only
-  (DNSSEC: AD / DNSSEC: no AD) — not package safety.
+  installed (exact version, SRI, and tarball), remembers the mapping and root
+  artifact (trust-on-first-use), and hands off an exact selector to npm with
+  lifecycle scripts disabled. It never executes text from the DNS record.
+  First use has nothing to compare against. Known artifact changes require manual
+  review, and same-version byte identity changes fail closed. DNSSEC lines report
+  the resolver AD bit only (DNSSEC: AD / DNSSEC: no AD) — not package safety.
 `;
 
 async function main(): Promise<number> {

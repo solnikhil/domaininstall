@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import { resolveTxt } from "../dist/doh.js";
@@ -296,7 +297,7 @@ async function main() {
   const isWindows = process.platform === "win32";
   const pinFile = join(state, "pins.json");
   const stored = JSON.parse(readFileSync(pinFile, "utf8")) as { version?: number };
-  check("writes a versioned pin schema", stored.version === 1);
+  check("writes artifact-aware pin schema v2", stored.version === 2);
   if (isWindows) {
     // Windows has no POSIX mode bits; the store relies on the user profile ACL.
     console.log("  - skipped POSIX permission checks on Windows");
@@ -411,8 +412,8 @@ process.stdout.write(JSON.stringify({ removed: removed ?? null, current: getPin(
         compareDelete.stdout === JSON.stringify({ removed: null, current: "changed" }),
     );
     check(
-      "forget leaves a valid v1 store with no temp or lock files",
-      (JSON.parse(readFileSync(join(listState, "pins.json"), "utf8")) as { version?: number }).version === 1 &&
+      "forget leaves a valid v2 store with no temp or lock files",
+      (JSON.parse(readFileSync(join(listState, "pins.json"), "utf8")) as { version?: number }).version === 2 &&
         !readdirSync(listState).some((name) => name.endsWith(".tmp") || name === "pins.lock"),
     );
     const corruptListState = mkdtempSync(join(tmpdir(), "dnstall-list-corrupt-"));
@@ -450,8 +451,17 @@ process.stdout.write(JSON.stringify({ removed: removed ?? null, current: getPin(
   );
 
   console.log("\n5. Package-manager detection + plan");
-  const plan = buildInstallPlan("stripe", "^18", "https://registry.npmjs.org/");
-  check("builds an npm-only install plan", plan.pm === "npm" && plan.spec === "stripe@^18");
+  const planArtifact = {
+    version: "18.3.1",
+    integrity: `sha512-${Buffer.alloc(64).toString("base64")}`,
+    tarball: "https://registry.npmjs.org/stripe/-/stripe-18.3.1.tgz",
+    resolvedAt: "2026-08-23T00:00:00.000Z",
+    tarballPath: join(tmpdir(), "stripe.tgz"),
+    cacheDir: join(tmpdir(), "domaininstall-test-cache"),
+    tempDir: join(tmpdir(), "domaininstall-artifact-test"),
+  };
+  const plan = buildInstallPlan("stripe", planArtifact, "https://registry.npmjs.org/");
+  check("builds an exact npm-only install plan", plan.pm === "npm" && plan.spec === "stripe@18.3.1");
   check(
     "pins the displayed registry and disables lifecycle scripts",
     plan.argv.includes("--ignore-scripts") &&
@@ -473,12 +483,12 @@ process.stdout.write(JSON.stringify({ removed: removed ?? null, current: getPin(
   check("rejects an insecure effective registry", !resolveNpmRegistry(tmp).ok);
   rmSync(tmp, { recursive: true, force: true });
 
-  const globalPlan = buildInstallPlan("stripe", undefined, "https://registry.npmjs.org/", { global: true });
+  const globalPlan = buildInstallPlan("stripe", planArtifact, "https://registry.npmjs.org/", { global: true });
   check(
     "global plan asks npm for a global install",
     globalPlan.global && globalPlan.argv.includes("--global") && globalPlan.display.includes("--global"),
   );
-  const projectPlan = buildInstallPlan("stripe", undefined, "https://registry.npmjs.org/");
+  const projectPlan = buildInstallPlan("stripe", planArtifact, "https://registry.npmjs.org/");
   check(
     "project plan never adds --global",
     !projectPlan.global && !projectPlan.argv.includes("--global"),
@@ -697,7 +707,7 @@ savePin("long.example", { namespace: "npm", package: "very-long-${"x".repeat(60)
   check(
     "trust forget --force removes one mapping, case-insensitively, and keeps the rest",
     forgetForced.status === 0 &&
-      afterForget.version === 1 &&
+      afterForget.version === 2 &&
       afterForget.pins["dropped.example"] === undefined &&
       afterForget.pins["kept.example"] !== undefined,
   );
@@ -729,18 +739,33 @@ savePin("long.example", { namespace: "npm", package: "very-long-${"x".repeat(60)
   const recovered = JSON.parse(readFileSync(join(recoveryState, "pins.json"), "utf8")) as { version?: number };
   check(
     "CLI recovery backs up and resets invalid trust state",
-    recovery.status === 0 && recovered.version === 1 && readdirSync(recoveryState).some((name) => name.startsWith("pins.backup-")),
+    recovery.status === 0 && recovered.version === 2 && readdirSync(recoveryState).some((name) => name.startsWith("pins.backup-")),
   );
   rmSync(recoveryState, { recursive: true, force: true });
 
   const gateRoot = mkdtempSync(join(tmpdir(), "dnstall-cli-gates-"));
   const fakeBin = join(gateRoot, "bin");
   mkdirSync(fakeBin);
+  const fakeArtifactBytes = "deterministic fake npm artifact";
+  const fakeArtifactIntegrity = `sha512-${createHash("sha512").update(fakeArtifactBytes).digest("base64")}`;
   const fakeNpmBody = `const fs = require("node:fs");
+const path = require("node:path");
 if (process.argv[2] === "config" && process.argv[3] === "get") {
   process.stdout.write("https://registry.npmjs.org/\\n");
   process.exit(0);
 }
+if (process.argv[2] === "view") {
+  process.stdout.write(JSON.stringify({ version: "1.2.3", "dist.integrity": ${JSON.stringify(fakeArtifactIntegrity)}, "dist.tarball": "https://registry.npmjs.org/safe-package/-/safe-package-1.2.3.tgz" }));
+  process.exit(0);
+}
+if (process.argv[2] === "pack") {
+  const outputArg = process.argv.find((arg) => arg.startsWith("--pack-destination="));
+  const output = outputArg.slice("--pack-destination=".length);
+  fs.writeFileSync(path.join(output, "safe-package-1.2.3.tgz"), ${JSON.stringify(fakeArtifactBytes)});
+  process.stdout.write(JSON.stringify([{ filename: "safe-package-1.2.3.tgz" }]));
+  process.exit(0);
+}
+if (process.argv[2] === "cache") process.exit(0);
 fs.appendFileSync(process.env.DOMAININSTALL_TEST_MARKER, "install\\n");
 `;
   const fakeNpm = join(fakeBin, "npm");

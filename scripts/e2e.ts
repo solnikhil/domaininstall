@@ -39,6 +39,10 @@ interface StoredPin {
   package?: string;
   registry?: string;
   dnsVersion?: string | null;
+  resolvedVersion?: string | null;
+  integrity?: string | null;
+  tarball?: string | null;
+  resolvedAt?: string | null;
   firstSeen?: string;
   lastSeen?: string;
 }
@@ -125,11 +129,29 @@ async function main(): Promise<void> {
     step("TOFU pin was recorded");
     const afterInstall = readPinFile(state);
     const pin = afterInstall.pins?.[domain];
-    if (afterInstall.version !== 1 || pin?.package !== expectedPackage) {
+    if (afterInstall.version !== 2 || pin?.package !== expectedPackage) {
       throw new Error(`expected a ${domain} -> ${expectedPackage} TOFU pin`);
     }
     if (!pin.registry?.startsWith("https://")) {
       throw new Error(`expected the pin to record an HTTPS registry, got ${String(pin.registry)}`);
+    }
+    if (!pin.resolvedVersion || !/^\d+\.\d+\.\d+/.test(pin.resolvedVersion)) {
+      throw new Error(`expected an exact resolved artifact version, got ${String(pin.resolvedVersion)}`);
+    }
+    if (!pin.integrity?.startsWith("sha512-")) {
+      throw new Error(`expected a SHA-512 artifact pin, got ${String(pin.integrity)}`);
+    }
+    if (!pin.tarball?.startsWith("https://") || !pin.resolvedAt) {
+      throw new Error("expected canonical tarball URL and resolution time in the artifact pin");
+    }
+    const projectManifest = JSON.parse(readFileSync(join(project, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+    };
+    if (projectManifest.dependencies?.[expectedPackage] !== pin.resolvedVersion) {
+      throw new Error(
+        `expected package.json to keep exact registry semantics (${expectedPackage}@${pin.resolvedVersion}), ` +
+          `got ${String(projectManifest.dependencies?.[expectedPackage])}`,
+      );
     }
     const firstSeen = pin.firstSeen;
     if (!firstSeen) throw new Error("expected the pin to record firstSeen");
