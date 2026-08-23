@@ -11,6 +11,10 @@ when that happens.
 
 ### Added
 
+- `di resolve <domain>[/sub][@version] --json` provides a side-effect-free,
+  versioned resolution contract for CI, agents, editors, and other machine
+  consumers, with stable outcomes and dedicated exit codes for operational and
+  trust failures.
 - An implementation-oriented v0 DNS record specification and documentation
   index, so independent producers and consumers can implement `_dnstall`
   without reverse-engineering the CLI.

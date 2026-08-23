@@ -80,8 +80,9 @@ function currentUid(): number | undefined {
   return typeof process.getuid === "function" ? process.getuid() : undefined;
 }
 
-function ensureStateDir(): void {
+function ensureStateDir(repairPermissions = true): void {
   if (!existsSync(DIR)) {
+    if (!repairPermissions) fail(`Trust-state directory ${DIR} disappeared while it was being inspected.`);
     mkdirSync(DIR, { recursive: true, mode: 0o700 });
   }
   const stat = lstatSync(DIR);
@@ -92,6 +93,7 @@ function ensureStateDir(): void {
   const uid = currentUid();
   if (uid !== undefined && stat.uid !== uid) fail(`Trust-state directory is not owned by the current user.`);
   if ((stat.mode & 0o077) !== 0) {
+    if (!repairPermissions) fail(`Trust-state directory ${DIR} has unsafe permissions.`);
     const fd = openSync(DIR, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       fchmodSync(fd, 0o700);
@@ -197,8 +199,13 @@ function decodeStore(raw: string): PinStore {
   return legacy;
 }
 
-function load(): PinStore {
-  if (existsSync(DIR)) ensureStateDir();
+function load(repairPermissions = true): PinStore {
+  // Read-only resolution treats a missing pin file as an absent snapshot. An
+  // empty pre-created directory (common in isolated CI fixtures) does not hold
+  // trust data, so its permissions need neither repair nor rejection. Once a
+  // pin file exists, both directory and file must pass the normal safety gates.
+  if (!repairPermissions && !existsSync(FILE)) return Object.create(null) as PinStore;
+  if (existsSync(DIR)) ensureStateDir(repairPermissions);
   if (!existsSync(FILE)) return Object.create(null) as PinStore;
 
   let fd: number;
@@ -213,7 +220,10 @@ function load(): PinStore {
     if (!stat.isFile()) fail(`Trust-state path ${FILE} is not a regular file.`);
     const uid = currentUid();
     if (uid !== undefined && stat.uid !== uid) fail(`Trust-state file is not owned by the current user.`);
-    if (!IS_WINDOWS && (stat.mode & 0o077) !== 0) fchmodSync(fd, 0o600);
+    if (!IS_WINDOWS && (stat.mode & 0o077) !== 0) {
+      if (!repairPermissions) fail(`Trust-state file ${FILE} has unsafe permissions.`);
+      fchmodSync(fd, 0o600);
+    }
     return decodeStore(readFileSync(fd, "utf8"));
   } finally {
     closeSync(fd);
@@ -319,6 +329,16 @@ export function getPin(domain: string): Pin | undefined {
   return load()[domain];
 }
 
+/**
+ * Read a pin without creating state or repairing permissions.
+ *
+ * Machine resolution promises not to mutate trust state, so an unsafe store
+ * fails closed instead of being chmod'd as a convenience during inspection.
+ */
+export function inspectPin(domain: string): Pin | undefined {
+  return load(false)[domain];
+}
+
 export interface PinEntry extends Pin {
   domain: string;
 }
@@ -362,6 +382,14 @@ export function diffPin(
 ): { existing: Pin | undefined; changes: PinChange[] } {
   const existing = getPin(domain);
   if (!existing) return { existing: undefined, changes: [] };
+  return { existing, changes: diffPinIdentity(existing, next) };
+}
+
+/** Compare a previously read pin without reading or mutating the store again. */
+export function diffPinIdentity(
+  existing: Pin,
+  next: { namespace: string; package: string; registry: string; dnsVersion: string | null },
+): PinChange[] {
   const changes: PinChange[] = [];
   if (existing.namespace !== next.namespace) {
     changes.push({ field: "namespace", was: existing.namespace, now: next.namespace });
@@ -389,7 +417,7 @@ export function diffPin(
       now: next.dnsVersion ?? "latest",
     });
   }
-  return { existing, changes };
+  return changes;
 }
 
 export type SavePinInput = {

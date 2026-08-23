@@ -18,6 +18,7 @@ import { dohTests } from "./tests/doh.test.ts";
 import { uiTests } from "./tests/ui.test.ts";
 import { pinTests } from "./tests/pin.test.ts";
 import { cliTests } from "./tests/cli.test.ts";
+import { resolveTests } from "./tests/resolve.test.ts";
 
 const modules: TestModule[] = [
   recordTests,
@@ -29,6 +30,7 @@ const modules: TestModule[] = [
   uiTests,
   pinTests,
   cliTests,
+  resolveTests,
 ];
 
 async function main(): Promise<void> {

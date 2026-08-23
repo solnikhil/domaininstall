@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/solnikhil/domaininstall/main/schema/resolve-v1.schema.json",
+  "title": "domaininstall resolve result v1",
+  "description": "The single JSON document emitted by di resolve <target> --json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "schema", "ok", "outcome", "exitCode", "input", "dns", "mappings", "registry", "pin", "error"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "schema": { "const": "https://raw.githubusercontent.com/solnikhil/domaininstall/main/schema/resolve-v1.schema.json" },
+    "ok": { "type": "boolean" },
+    "outcome": { "enum": ["resolved", "invalid_input", "authoritative_absence", "provider_exhaustion", "conflicting_mappings", "registry_failure", "pin_changed", "internal_failure", "invalid_declaration"] },
+    "exitCode": { "enum": [0, 2, 3, 4, 5, 6, 7, 8, 9] },
+    "input": { "$ref": "#/$defs/input" },
+    "dns": { "$ref": "#/$defs/dns" },
+    "mappings": { "$ref": "#/$defs/mappings" },
+    "registry": { "$ref": "#/$defs/registry" },
+    "pin": { "$ref": "#/$defs/pin" },
+    "error": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/error" }] }
+  },
+  "allOf": [
+    { "if": { "properties": { "outcome": { "const": "resolved" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": true }, "exitCode": { "const": 0 }, "error": { "type": "null" } } } },
+    { "if": { "properties": { "outcome": { "const": "invalid_input" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": false }, "exitCode": { "const": 2 }, "error": { "$ref": "#/$defs/error" } } } },
+    { "if": { "properties": { "outcome": { "const": "authoritative_absence" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": false }, "exitCode": { "const": 3 }, "error": { "$ref": "#/$defs/error" } } } },
+    { "if": { "properties": { "outcome": { "const": "provider_exhaustion" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": false }, "exitCode": { "const": 4 }, "error": { "$ref": "#/$defs/error" } } } },
+    { "if": { "properties": { "outcome": { "const": "conflicting_mappings" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": false }, "exitCode": { "const": 5 }, "error": { "$ref": "#/$defs/error" } } } },
+    { "if": { "properties": { "outcome": { "const": "registry_failure" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": false }, "exitCode": { "const": 6 }, "error": { "$ref": "#/$defs/error" } } } },
+    { "if": { "properties": { "outcome": { "const": "pin_changed" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": false }, "exitCode": { "const": 7 }, "error": { "$ref": "#/$defs/error" } } } },
+    { "if": { "properties": { "outcome": { "const": "internal_failure" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": false }, "exitCode": { "const": 8 }, "error": { "$ref": "#/$defs/error" } } } },
+    { "if": { "properties": { "outcome": { "const": "invalid_declaration" } }, "required": ["outcome"] }, "then": { "properties": { "ok": { "const": false }, "exitCode": { "const": 9 }, "error": { "$ref": "#/$defs/error" } } } }
+  ],
+  "$defs": {
+    "nullableString": { "type": ["string", "null"] },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "normalizedTarget", "domain", "subdomain", "effectiveDomain", "cliVersionOverride", "dnsName"],
+      "properties": {
+        "target": { "type": "string" },
+        "normalizedTarget": { "$ref": "#/$defs/nullableString" },
+        "domain": { "$ref": "#/$defs/nullableString" },
+        "subdomain": { "$ref": "#/$defs/nullableString" },
+        "effectiveDomain": { "$ref": "#/$defs/nullableString" },
+        "cliVersionOverride": { "$ref": "#/$defs/nullableString" },
+        "dnsName": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "identity", "outcome", "status"],
+      "properties": {
+        "provider": { "type": "string" },
+        "identity": { "type": "string" },
+        "outcome": { "enum": ["answer", "nodata", "nxdomain", "servfail", "refused", "timeout", "network_error", "http_error", "malformed", "dns_error"] },
+        "status": { "type": ["integer", "null"] }
+      }
+    },
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "queriedName", "records", "resolver", "dnssec", "status", "attempts"],
+      "properties": {
+        "outcome": { "enum": ["not_queried", "answer", "nodata", "nxdomain", "provider_exhaustion"] },
+        "queriedName": { "$ref": "#/$defs/nullableString" },
+        "records": { "type": "array", "items": { "type": "string" } },
+        "resolver": { "oneOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["provider", "identity"], "properties": { "provider": { "type": "string" }, "identity": { "type": "string" } } }] },
+        "dnssec": { "type": "object", "additionalProperties": false, "required": ["ad", "source"], "properties": { "ad": { "type": "boolean" }, "source": { "const": "resolver_reported" } } },
+        "status": { "type": ["integer", "null"] },
+        "attempts": { "type": "array", "items": { "$ref": "#/$defs/attempt" } }
+      }
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "package", "dnsVersionPolicy", "effectiveVersion", "versionSource", "metadata", "raw"],
+      "properties": {
+        "namespace": { "type": "string" },
+        "package": { "type": "string" },
+        "dnsVersionPolicy": { "$ref": "#/$defs/nullableString" },
+        "effectiveVersion": { "$ref": "#/$defs/nullableString" },
+        "versionSource": { "enum": ["cli", "dns", "latest"] },
+        "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+        "raw": { "type": "string" }
+      }
+    },
+    "mappings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported", "unsupported", "selected", "conflicts"],
+      "properties": {
+        "supported": { "type": "array", "items": { "$ref": "#/$defs/mapping" } },
+        "unsupported": { "type": "array", "items": { "$ref": "#/$defs/mapping" } },
+        "selected": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/mapping" }] },
+        "conflicts": { "type": "array", "items": { "$ref": "#/$defs/mapping" } }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "effective", "message"],
+      "properties": {
+        "status": { "enum": ["not_attempted", "resolved", "failed"] },
+        "effective": { "$ref": "#/$defs/nullableString" },
+        "message": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "storedPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "package", "registry", "dnsVersion", "firstSeen", "lastSeen"],
+      "properties": {
+        "namespace": { "type": "string" },
+        "package": { "type": "string" },
+        "registry": { "type": "string", "format": "uri" },
+        "dnsVersion": { "$ref": "#/$defs/nullableString" },
+        "firstSeen": { "type": "string", "format": "date-time" },
+        "lastSeen": { "type": "string", "format": "date-time" }
+      }
+    },
+    "pinDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "was", "now"],
+      "properties": {
+        "field": { "enum": ["namespace", "package", "registry", "dnsVersion"] },
+        "was": { "type": "string" },
+        "now": { "type": "string" }
+      }
+    },
+    "pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "current", "diff"],
+      "properties": {
+        "status": { "enum": ["not_checked", "absent", "uncompared", "match", "changed"] },
+        "current": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/storedPin" }] },
+        "diff": { "type": "array", "items": { "$ref": "#/$defs/pinDiff" } }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "enum": ["USAGE", "INVALID_TARGET", "DNS_NXDOMAIN", "DNS_NODATA", "DNS_PROVIDER_EXHAUSTION", "DNS_NO_VALID_RECORD", "DNS_UNSUPPORTED_NAMESPACE", "DNS_CONFLICT", "INVALID_PACKAGE_NAME", "INVALID_VERSION", "REGISTRY_RESOLUTION_FAILED", "PIN_CHANGED", "PIN_STORE_FAILURE", "INTERNAL"] },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

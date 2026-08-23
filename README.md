@@ -153,6 +153,7 @@ metadata, duplicate and conflict handling, and producer/consumer conformance.
 di <domain>[/sub][@version]    resolve, confirm, and install
 di <domain> --global           install globally instead of into this project
 di verify <domain>             inspect a declaration without installing
+di resolve <domain> --json     resolve to versioned JSON without side effects
 di setup <domain> <package>    print the TXT record a publisher must add
 di trust list                  show every remembered mapping
 di trust forget <domain>       remove one remembered mapping
@@ -164,8 +165,15 @@ di --version                   print the CLI version
 The npm package exposes `di` as the primary command, with `domaininstall` and
 `dnstall` as aliases.
 
-Progress and previews go to standard output; warnings and errors go to standard
-error — so `di` plays nicely with scripts and CI logs.
+Machine consumers should use `di resolve <domain>[/sub][@version] --json`, not
+scrape `verify` output. It emits exactly one versioned JSON document and never
+installs, prompts, or writes trust state. See the
+[`resolve --json` contract](docs/RESOLVE-JSON.md) for its checked-in schema,
+stable outcomes, and exit codes.
+
+Human-oriented progress and previews go to standard output; warnings and errors
+go to standard error. `resolve --json` is the exception by design: every
+expected success or failure is one JSON document on standard output.
 
 ## Requirements and current limits
 

@@ -4,6 +4,7 @@ export type CliCommand =
   | { kind: "version" }
   | { kind: "install"; target: string; yes: boolean; global: boolean }
   | { kind: "verify"; target: string }
+  | { kind: "resolve"; target: string }
   | { kind: "setup"; target: string; packageSpec: string }
   | { kind: "trust_list" }
   | { kind: "trust_forget"; domain: string; force: boolean }
@@ -22,6 +23,7 @@ const KNOWN_FLAGS = new Set([
   "--version",
   "--all",
   "--force",
+  "--json",
 ]);
 
 export function parseCliArgs(args: string[]): CliParseResult {
@@ -87,6 +89,14 @@ export function parseCliArgs(args: string[]): CliParseResult {
     if (positionals.length !== 2) return { ok: false, error: "verify requires exactly one domain." };
     if (flags.length > 0) return { ok: false, error: "verify does not accept options." };
     return { ok: true, command: { kind: "verify", target: positionals[1]! } };
+  }
+
+  if (positionals[0] === "resolve") {
+    if (positionals.length !== 2) return { ok: false, error: "resolve requires exactly one domain." };
+    if (flags.length !== 1 || flags[0] !== "--json") {
+      return { ok: false, error: "usage: di resolve <domain>[/sub][@version] --json" };
+    }
+    return { ok: true, command: { kind: "resolve", target: positionals[1]! } };
   }
 
   if (positionals[0] === "setup") {

@@ -19,7 +19,7 @@ function run(h: Harness): void {
   h.check("rejects version with target", !parseCliArgs(["example.com", "--version"]).ok);
   h.check("rejects both help and version", !parseCliArgs(["--help", "--version"]).ok);
   h.check("rejects -- separator", !parseCliArgs(["example.com", "--"]).ok);
-  h.check("rejects unknown flag", !parseCliArgs(["example.com", "--json"]).ok);
+  h.check("rejects --json on install", !parseCliArgs(["example.com", "--json"]).ok);
   h.check("rejects duplicate --yes", !parseCliArgs(["example.com", "--yes", "-y"]).ok);
   h.check("rejects duplicate global", !parseCliArgs(["example.com", "-g", "--global"]).ok);
   h.check("rejects unknown + known flag mix", !parseCliArgs(["example.com", "--yes", "--nope"]).ok);
@@ -60,6 +60,15 @@ function run(h: Harness): void {
   h.check("verify requires domain", !parseCliArgs(["verify"]).ok);
   h.check("verify rejects extra args", !parseCliArgs(["verify", "a.com", "b.com"]).ok);
   h.check("verify rejects flags", !parseCliArgs(["verify", "a.com", "--yes"]).ok);
+
+  const resolve = parseCliArgs(["resolve", "example.com/sub@^2", "--json"]);
+  h.check(
+    "resolve requires an explicit JSON format",
+    resolve.ok && resolve.command.kind === "resolve" && resolve.command.target === "example.com/sub@^2",
+  );
+  h.check("resolve rejects a missing target", !parseCliArgs(["resolve", "--json"]).ok);
+  h.check("resolve rejects missing --json", !parseCliArgs(["resolve", "example.com"]).ok);
+  h.check("resolve rejects install flags", !parseCliArgs(["resolve", "example.com", "--json", "--yes"]).ok);
 
   const trust = parseCliArgs(["trust", "reset", "--all"]);
   h.check("trust reset --all", trust.ok && trust.command.kind === "trust_reset" && !trust.command.force);
