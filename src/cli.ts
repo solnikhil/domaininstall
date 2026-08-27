@@ -43,6 +43,7 @@ import {
 } from "./install.js";
 import { c, ce, info, detail, warn, error, success, confirm } from "./ui.js";
 import { sanitizeTerminalText } from "./terminal.js";
+import { CLI_CLAIM_BOUNDARY } from "./claims.js";
 
 const NAMESPACE = "npm"; // only npm is wired up in v0
 
@@ -455,10 +456,11 @@ async function cmdVerify(target: string): Promise<number> {
   info(c.dim(`  pin file: ${PIN_FILE}`));
   info("");
   if (pin) {
-    success("Record looks valid and matches the trust pin.");
+    success("Declaration record is valid and matches the trust pin.");
   } else {
-    success("Record looks valid.");
+    success("Declaration record is valid.");
   }
+  info(c.dim(`  ${CLI_CLAIM_BOUNDARY}`));
   return 0;
 }
 
@@ -632,7 +634,8 @@ async function cmdTrustReset(force: boolean): Promise<number> {
 const GET_STARTED = `
 ${c.bold("di")} — install packages by domain name
 
-  A domain tells ${c.bold("di")} which package it vouches for.
+  A domain declares a package in DNS; ${c.bold("di")} shows that declaration.
+  ${CLI_CLAIM_BOUNDARY}
   You see the exact install command before anything runs.
 
 ${c.cyan("GET STARTED")}
@@ -674,7 +677,7 @@ ${c.dim("USAGE")}
   dnstall <domain>                           legacy short alias
 
 ${c.dim("EXAMPLES")}
-  di zuraai.xyz                      install the package zuraai.xyz vouches for
+  di zuraai.xyz                      install the package zuraai.xyz declares
   di stripe.com/react                install the "react" sub-package
   di stripe.com@^18                  override the install version range
   di stripe.com --global             install globally instead of into this project
@@ -704,6 +707,7 @@ ${c.dim("HOW IT WORKS")}
   First use has nothing to compare against; --yes skips the prompt only when the
   remembered pin still matches. DNSSEC lines report the resolver AD bit only
   (DNSSEC: AD / DNSSEC: no AD) — not package safety.
+  ${CLI_CLAIM_BOUNDARY}
 `;
 
 async function main(): Promise<number> {

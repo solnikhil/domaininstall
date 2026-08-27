@@ -1,0 +1,21 @@
+{
+  "hook": {
+    "headline": [
+      "Which",
+      "package",
+      "does",
+      "the",
+      "domain",
+      "declare?"
+    ],
+    "declaredBadge": "DECLARED BY DOMAIN",
+    "otherBadge": "NOT DECLARED",
+    "caption": "Similar names can still be different packages."
+  },
+  "verify": {
+    "dnssecFact": "DNSSEC: AD",
+    "lookupFact": "read-only lookup",
+    "verdict": "Declaration found.",
+    "boundary": "Checks the domain→package declaration—not package safety or publisher identity."
+  }
+}
