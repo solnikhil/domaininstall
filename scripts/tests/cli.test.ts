@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -211,6 +212,20 @@ globalThis.fetch = async () => {
   );
   h.check("install second time with same pin succeeds", install2.status === 0);
 
+  // A trust transaction must be reservable before npm install mutates the
+  // project. A non-file lock is unsafe and cannot be recovered automatically.
+  if (existsSync(marker)) rmSync(marker);
+  const blockedState = join(root, "blocked-lock-state");
+  mkdirSync(join(blockedState, "pins.lock"), { recursive: true });
+  const blockedInstall = runCli(["blocked.example", "--yes"], {
+    DOMAININSTALL_STATE_DIR: blockedState,
+    DOMAININSTALL_TEST_DNS_MODE: "single",
+  });
+  h.check(
+    "npm install never starts when the trust transaction cannot be reserved",
+    blockedInstall.status !== 0 && !existsSync(marker),
+  );
+
   // install without --yes on non-tty should refuse
   if (existsSync(marker)) rmSync(marker);
   const noYes = spawnSync(process.execPath, ["--import", mockDnsUrl, cli, "fresh.example"], {
@@ -305,6 +320,20 @@ globalThis.fetch = async () => {
     DOMAININSTALL_STATE_DIR: join(root, "trust-empty"),
   });
   h.check("trust reset --force on empty/new state succeeds", tr.status === 0);
+
+  const malformedResetState = join(root, "trust-malformed-lock");
+  mkdirSync(malformedResetState, { recursive: true });
+  const malformedLock = join(malformedResetState, "pins.lock");
+  writeFileSync(malformedLock, '{"pid":', "utf8");
+  const oldLockTime = new Date(Date.now() - 2000);
+  utimesSync(malformedLock, oldLockTime, oldLockTime);
+  const malformedReset = runCli(["trust", "reset", "--all", "--force"], {
+    DOMAININSTALL_STATE_DIR: malformedResetState,
+  });
+  h.check(
+    "trust reset --force recovers a truncated orphan lock",
+    malformedReset.status === 0 && !existsSync(malformedLock),
+  );
 
   // invalid target
   const bad = runCli(["not a domain", "--yes"], {

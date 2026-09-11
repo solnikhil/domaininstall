@@ -13,11 +13,14 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -61,8 +64,18 @@ const IS_WINDOWS = process.platform === "win32";
 const DIR = process.env.DOMAININSTALL_STATE_DIR || join(homedir(), ".domaininstall");
 const FILE = join(DIR, "pins.json");
 const LOCK_FILE = join(DIR, "pins.lock");
+const RECOVERY_DIR = join(DIR, ".pins-lock-recovery");
 const STORE_VERSION = 1;
 const LOCK_WAIT_MS = 5000;
+// A lock created by older releases was visible before its metadata was
+// written. Give an in-flight legacy writer time to finish before treating an
+// unchanged malformed file as crash residue. New locks are atomically
+// published only after their metadata is durable, so they never need this
+// grace period.
+const MALFORMED_LOCK_GRACE_MS = 250;
+const RECOVERY_BARRIER_GRACE_MS = 1000;
+const PRIVATE_OWNER_GRACE_MS = 60_000;
+const LOCK_VERSION = 1;
 
 type PinStore = Record<string, Pin>;
 interface StoredPinFile {
@@ -262,41 +275,413 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
-function removeStaleLock(): boolean {
+interface LockMetadata {
+  version: typeof LOCK_VERSION;
+  pid: number;
+  token: string;
+  createdAt: string;
+}
+
+interface LockHandle {
+  release(): void;
+}
+
+interface RecoveryBarrier {
+  release(): void;
+}
+
+interface InspectedLockMetadata {
+  pid: number;
+  current: LockMetadata | null;
+}
+
+function inspectLockMetadata(raw: string): InspectedLockMetadata | null {
+  let value: unknown;
   try {
-    const stat = lstatSync(LOCK_FILE);
-    if (stat.isSymbolicLink() || !stat.isFile()) fail(`Unsafe trust-state lock at ${LOCK_FILE}.`);
-    const raw = JSON.parse(readFileSync(LOCK_FILE, "utf8")) as unknown;
-    if (!isPlainObject(raw) || !Number.isInteger(raw.pid) || typeof raw.pid !== "number") return false;
-    if (processIsAlive(raw.pid)) return false;
-    unlinkSync(LOCK_FILE);
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+  if (
+    !isPlainObject(value) ||
+    typeof value.pid !== "number" ||
+    !Number.isSafeInteger(value.pid) ||
+    value.pid <= 0
+  ) {
+    return null;
+  }
+
+  // A parseable PID is honored even when the rest of the metadata came from
+  // the pre-v1 protocol or is truncated. This intentionally favors waiting
+  // over stealing a lock from a process that may still be writing it.
+  if (
+    value.version !== LOCK_VERSION ||
+    typeof value.token !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.token) ||
+    !isIsoTimestamp(value.createdAt)
+  ) {
+    return { pid: value.pid, current: null };
+  }
+  return { pid: value.pid, current: value as unknown as LockMetadata };
+}
+
+function sameFile(a: { dev: number; ino: number }, b: { dev: number; ino: number }): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
+function acquireRecoveryBarrier(): RecoveryBarrier | null {
+  const token = randomUUID();
+  const building = join(DIR, `.pins-lock-recovery-${process.pid}-${token}.tmp`);
+  const buildingOwner = join(building, "owner.json");
+  const metadata: LockMetadata = {
+    version: LOCK_VERSION,
+    pid: process.pid,
+    token,
+    createdAt: new Date().toISOString(),
+  };
+  const raw = JSON.stringify(metadata);
+  let ownerFd: number | undefined;
+  try {
+    mkdirSync(building, { mode: 0o700 });
+    ownerFd = openSync(
+      buildingOwner,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(ownerFd, raw, "utf8");
+    fsyncSync(ownerFd);
+    closeSync(ownerFd);
+    ownerFd = undefined;
+    renameSync(building, RECOVERY_DIR);
+  } catch (error) {
+    if (ownerFd !== undefined) closeSync(ownerFd);
+    try {
+      unlinkSync(buildingOwner);
+    } catch {
+      // Metadata may not have been created.
+    }
+    try {
+      rmdirSync(building);
+    } catch {
+      // Private directory may already have been published.
+    }
+    if (existsSync(RECOVERY_DIR)) return null;
+    throw error;
+  }
+
+  const releaseClaim = join(DIR, `.pins-lock-recovery-release-${process.pid}-${token}.tmp`);
+  let released = false;
+  return {
+    release(): void {
+      if (released) return;
+      released = true;
+      try {
+        renameSync(RECOVERY_DIR, releaseClaim);
+        const claimedOwner = join(releaseClaim, "owner.json");
+        if (readFileSync(claimedOwner, "utf8") !== raw) {
+          if (!existsSync(RECOVERY_DIR)) renameSync(releaseClaim, RECOVERY_DIR);
+          return;
+        }
+        unlinkSync(claimedOwner);
+        rmdirSync(releaseClaim);
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      }
+    },
+  };
+}
+
+function removeStaleRecoveryBarrier(): boolean {
+  const owner = join(RECOVERY_DIR, "owner.json");
+  let raw: string | null = null;
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(RECOVERY_DIR);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      fail(`Unsafe trust-state recovery barrier at ${RECOVERY_DIR}.`);
+    }
+    try {
+      raw = readFileSync(owner, "utf8");
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    const inspected = raw === null ? null : inspectLockMetadata(raw);
+    if (inspected && processIsAlive(inspected.pid)) return false;
+    if (!inspected?.current && Date.now() - stat.mtimeMs < RECOVERY_BARRIER_GRACE_MS) return false;
+  } catch (error) {
+    if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    return false;
+  }
+
+  const claim = join(DIR, `.pins-lock-recovery-stale-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    renameSync(RECOVERY_DIR, claim);
+    const claimedOwner = join(claim, "owner.json");
+    const claimedRaw = existsSync(claimedOwner) ? readFileSync(claimedOwner, "utf8") : null;
+    if (claimedRaw !== raw) {
+      if (!existsSync(RECOVERY_DIR)) renameSync(claim, RECOVERY_DIR);
+      return false;
+    }
+    const entries = readdirSync(claim);
+    if (entries.some((entry) => entry !== "owner.json")) {
+      if (!existsSync(RECOVERY_DIR)) renameSync(claim, RECOVERY_DIR);
+      fail(`Unsafe contents in trust-state recovery barrier ${RECOVERY_DIR}.`);
+    }
+    if (claimedRaw !== null) unlinkSync(claimedOwner);
+    rmdirSync(claim);
     return true;
   } catch (error) {
     if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
     return false;
   }
 }
 
-function withLock<T>(operation: () => T): T {
-  ensureStateDir();
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  let lockFd: number | undefined;
-
-  while (lockFd === undefined) {
+function cleanupPrivateRecoveryDirectories(): void {
+  const pattern = /^\.pins-lock-recovery-(?:(?:release|stale)-)?\d+-[0-9a-f-]+\.tmp$/i;
+  for (const name of readdirSync(DIR)) {
+    if (!pattern.test(name)) continue;
+    const path = join(DIR, name);
+    const owner = join(path, "owner.json");
     try {
-      lockFd = openSync(
-        LOCK_FILE,
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+      const raw = existsSync(owner) ? readFileSync(owner, "utf8") : null;
+      const inspected = raw === null ? null : inspectLockMetadata(raw);
+      if (inspected && processIsAlive(inspected.pid)) continue;
+      if (Date.now() - stat.mtimeMs < PRIVATE_OWNER_GRACE_MS) continue;
+      const entries = readdirSync(path);
+      if (entries.some((entry) => entry !== "owner.json")) continue;
+      if (raw !== null) unlinkSync(owner);
+      rmdirSync(path);
+    } catch {
+      // Best-effort cleanup of unpublished/quarantined recovery metadata.
+    }
+  }
+}
+
+/**
+ * Remove a lock only while retaining a hard-link claim to the exact inode we
+ * inspected. This prevents a delayed cleanup/release from unlinking a newer
+ * owner's lock after the pathname has been reused.
+ */
+function unlinkClaimedLock(observed: { dev: number; ino: number }, metadata: LockMetadata | null): boolean {
+  const claim = join(DIR, `.pins-lock-claim-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    linkSync(LOCK_FILE, claim);
+    const claimed = lstatSync(claim);
+    if (!sameFile(observed, claimed)) return false;
+
+    const current = lstatSync(LOCK_FILE);
+    if (!sameFile(claimed, current)) return false;
+    unlinkSync(LOCK_FILE);
+
+    // New-protocol owners retain their original hard link while holding the
+    // lock. Clean it after a crashed owner, but only if it is the inode claimed
+    // above; never trust metadata to select an arbitrary path.
+    if (metadata) {
+      const owner = join(DIR, `.pins-lock-${metadata.token}.owner`);
+      try {
+        if (sameFile(claimed, lstatSync(owner))) unlinkSync(owner);
+      } catch {
+        // Missing owner link is harmless: the public lock was reclaimed.
+      }
+    }
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    return false;
+  } finally {
+    try {
+      unlinkSync(claim);
+    } catch {
+      // The claim may not have been created.
+    }
+  }
+}
+
+function removeStaleLock(): boolean {
+  let fd: number | undefined;
+  try {
+    fd = openSync(LOCK_FILE, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(fd);
+    if (stat.isSymbolicLink() || !stat.isFile()) fail(`Unsafe trust-state lock at ${LOCK_FILE}.`);
+    const inspected = inspectLockMetadata(readFileSync(fd, "utf8"));
+    if (inspected && processIsAlive(inspected.pid)) return false;
+    if (!inspected?.current && Date.now() - stat.mtimeMs < MALFORMED_LOCK_GRACE_MS) {
+      return false;
+    }
+    // Retain only stable identity before closing the inspection handle.
+    const observed = { dev: stat.dev, ino: stat.ino };
+    closeSync(fd);
+    fd = undefined;
+    if (IS_WINDOWS) return removeStaleWindowsLock();
+    return unlinkClaimedLock(observed, inspected?.current ?? null);
+  } catch (error) {
+    if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * Windows Node 22 cannot reliably unlink the public name while a hard-link
+ * claim exists. Serialize recovery, revalidate under that barrier, then
+ * atomically rename the exact stale pathname to a unique quarantine name.
+ */
+function removeStaleWindowsLock(): boolean {
+  const barrier = acquireRecoveryBarrier();
+  if (!barrier) return false;
+  let fd: number | undefined;
+  const claim = join(DIR, `.pins-lock-claim-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    fd = openSync(LOCK_FILE, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) fail(`Unsafe trust-state lock at ${LOCK_FILE}.`);
+    const raw = readFileSync(fd, "utf8");
+    const inspected = inspectLockMetadata(raw);
+    if (inspected && processIsAlive(inspected.pid)) return false;
+    if (!inspected?.current && Date.now() - stat.mtimeMs < MALFORMED_LOCK_GRACE_MS) return false;
+    closeSync(fd);
+    fd = undefined;
+
+    renameSync(LOCK_FILE, claim);
+    const claimed = lstatSync(claim);
+    if (readFileSync(claim, "utf8") !== raw) {
+      // Windows inode values are not stable across handles on every Node 22
+      // runner/filesystem combination. The barrier plus immutable full lock
+      // payload gives us a portable instance identity instead.
+      if (!existsSync(LOCK_FILE)) renameSync(claim, LOCK_FILE);
+      return false;
+    }
+
+    if (inspected?.current) {
+      const owner = join(DIR, `.pins-lock-${inspected.current.token}.owner`);
+      try {
+        if (sameFile(claimed, lstatSync(owner))) unlinkSync(owner);
+      } catch {
+        // A crashed owner may already have lost its private name.
+      }
+    }
+    unlinkSync(claim);
+    return true;
+  } catch (error) {
+    if (error instanceof PinStoreError) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    const code = error instanceof Error && "code" in error ? String(error.code) : "unknown";
+    throw new PinStoreError(`Cannot recover the trust-state lock on Windows (${code}).`);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    barrier.release();
+  }
+}
+
+function cleanupOrphanLockFiles(): void {
+  const ownerPattern = /^\.pins-lock-([0-9a-f-]+)\.(owner|tmp)$/i;
+  for (const name of readdirSync(DIR)) {
+    const match = ownerPattern.exec(name);
+    if (!match) continue;
+    const path = join(DIR, name);
+    try {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink > 1) continue;
+      const inspected = inspectLockMetadata(readFileSync(path, "utf8"));
+      if (inspected && processIsAlive(inspected.pid)) continue;
+      if (Date.now() - stat.mtimeMs < PRIVATE_OWNER_GRACE_MS) continue;
+      // Private names contain an unguessable token and are never reused. A
+      // single-link file with a dead/missing owner cannot be the public lock.
+      unlinkSync(path);
+    } catch {
+      // Cleanup is best-effort and must never make lock acquisition less safe.
+    }
+  }
+}
+
+function acquireLock(): LockHandle {
+  ensureStateDir();
+  cleanupOrphanLockFiles();
+  if (IS_WINDOWS) cleanupPrivateRecoveryDirectories();
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  while (true) {
+    if (IS_WINDOWS && existsSync(RECOVERY_DIR)) {
+      if (removeStaleRecoveryBarrier()) continue;
+      if (Date.now() >= deadline) {
+        throw new PinStoreError("Timed out waiting for trust-state lock recovery to finish.");
+      }
+      Atomics.wait(sleeper, 0, 0, 25);
+      continue;
+    }
+    const token = randomUUID();
+    const owner = join(DIR, `.pins-lock-${token}.owner`);
+    const building = join(DIR, `.pins-lock-${token}.tmp`);
+    let ownerFd: number | undefined;
+    try {
+      // Construct and flush the owner privately. Publishing it with link(2)
+      // is one atomic namespace operation, eliminating the empty/truncated
+      // live-lock window of open(O_EXCL) followed by write.
+      ownerFd = openSync(
+        building,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
         0o600,
       );
-      writeFileSync(lockFd, JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }), "utf8");
-      fsyncSync(lockFd);
+      const metadata: LockMetadata = {
+        version: LOCK_VERSION,
+        pid: process.pid,
+        token,
+        createdAt: new Date().toISOString(),
+      };
+      writeFileSync(ownerFd, JSON.stringify(metadata), "utf8");
+      fsyncSync(ownerFd);
+      closeSync(ownerFd);
+      ownerFd = undefined;
+      renameSync(building, owner);
+      linkSync(owner, LOCK_FILE);
+
+      let released = false;
+      const handle: LockHandle = {
+        release(): void {
+          if (released) return;
+          released = true;
+          try {
+            const held = lstatSync(owner);
+            try {
+              const current = lstatSync(LOCK_FILE);
+              if (sameFile(held, current)) unlinkSync(LOCK_FILE);
+            } catch {
+              // Missing/replaced public lock: do not touch the replacement.
+            }
+          } finally {
+            try {
+              unlinkSync(owner);
+            } catch {
+              // The private owner link may already have been reclaimed.
+            }
+          }
+        },
+      };
+      // Close the check/publish race with Windows recovery: a publisher that
+      // overlapped barrier creation withdraws its lock and retries after the
+      // recovery owner finishes.
+      if (IS_WINDOWS && existsSync(RECOVERY_DIR)) {
+        handle.release();
+        Atomics.wait(sleeper, 0, 0, 25);
+        continue;
+      }
+      return handle;
     } catch (error) {
-      if (lockFd !== undefined) {
-        closeSync(lockFd);
-        lockFd = undefined;
-        if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
-        throw error;
+      if (ownerFd !== undefined) closeSync(ownerFd);
+      try {
+        unlinkSync(owner);
+      } catch {
+        // Owner may not have been created.
+      }
+      try {
+        unlinkSync(building);
+      } catch {
+        // Build file may already have been promoted or removed.
       }
       if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
       if (removeStaleLock()) continue;
@@ -306,12 +691,14 @@ function withLock<T>(operation: () => T): T {
       Atomics.wait(sleeper, 0, 0, 25);
     }
   }
+}
 
+function withLock<T>(operation: () => T): T {
+  const lock = acquireLock();
   try {
     return operation();
   } finally {
-    closeSync(lockFd);
-    if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
+    lock.release();
   }
 }
 
@@ -402,6 +789,17 @@ export type SavePinInput = {
 export type SavePinResult =
   | { ok: true }
   | { ok: false; reason: "diverged" | "invalid"; message: string; changes?: PinChange[] };
+
+export interface PinCommitReservation {
+  /** Persist the validated pin while the reservation still owns the writer lock. */
+  commit(): SavePinResult;
+  /** Release without changing trust state (for example, after npm fails). */
+  release(): void;
+}
+
+export type ReservePinCommitResult =
+  | { ok: true; reservation: PinCommitReservation }
+  | Exclude<SavePinResult, { ok: true }>;
 
 type PinIdentity = {
   namespace: string;
@@ -509,12 +907,33 @@ export function savePin(
   next: SavePinInput,
   expectedExisting?: Pin | undefined,
 ): SavePinResult {
-  return withLock(() => {
-    const validated = validateSavePinInput(domain, next);
-    if (!validated.ok) {
-      return { ok: false, reason: "invalid", message: validated.message };
-    }
+  const reserved = reservePinCommit(domain, next, expectedExisting);
+  if (!reserved.ok) return reserved;
+  try {
+    return reserved.reservation.commit();
+  } finally {
+    reserved.reservation.release();
+  }
+}
 
+/**
+ * Validate and reserve a trust-state transaction before an external install
+ * mutates the project. The writer lock remains held until commit/release, so a
+ * successful npm run cannot later lose its continuity update to another
+ * domaininstall writer or to pre-existing crash residue.
+ */
+export function reservePinCommit(
+  domain: string,
+  next: SavePinInput,
+  expectedExisting?: Pin | undefined,
+): ReservePinCommitResult {
+  const validated = validateSavePinInput(domain, next);
+  if (!validated.ok) {
+    return { ok: false, reason: "invalid", message: validated.message };
+  }
+
+  const lock = acquireLock();
+  try {
     const store = load();
     const current = store[validated.domain];
 
@@ -529,43 +948,61 @@ export function savePin(
       // the identity we intended. Treat as success (refresh lastSeen) instead of
       // failing a completed install over a race on an identical pin.
       if (expectedAbsent && current !== undefined && pinIdentityEqual(current, validated.next)) {
-        const now = new Date().toISOString();
-        store[validated.domain] = {
-          ...validated.next,
-          firstSeen: current.firstSeen,
-          lastSeen: now,
+        // The identical first-use race is safe, but defer its lastSeen refresh
+        // until commit just like every other reserved transaction.
+      } else {
+        const changes =
+          current !== undefined && expectedExisting !== undefined
+            ? identityChanges(expectedExisting, current)
+            : current !== undefined
+              ? identityChanges(current, validated.next)
+              : undefined;
+        lock.release();
+        return {
+          ok: false,
+          reason: "diverged",
+          message: expectedAbsent
+            ? `Trust pin for ${validated.domain} appeared while confirming; store was not updated.`
+            : current === undefined
+              ? `Trust pin for ${validated.domain} was removed while confirming; store was not updated.`
+              : `Trust pin for ${validated.domain} changed while confirming; store was not updated.`,
+          ...(changes !== undefined && changes.length > 0 ? { changes } : {}),
         };
-        writeAtomically(store);
-        return { ok: true };
       }
-
-      const changes =
-        current !== undefined && expectedExisting !== undefined
-          ? identityChanges(expectedExisting, current)
-          : current !== undefined
-            ? identityChanges(current, validated.next)
-            : undefined;
-      return {
-        ok: false,
-        reason: "diverged",
-        message: expectedAbsent
-          ? `Trust pin for ${validated.domain} appeared while confirming; store was not updated.`
-          : current === undefined
-            ? `Trust pin for ${validated.domain} was removed while confirming; store was not updated.`
-            : `Trust pin for ${validated.domain} changed while confirming; store was not updated.`,
-        ...(changes !== undefined && changes.length > 0 ? { changes } : {}),
-      };
     }
 
-    const now = new Date().toISOString();
-    store[validated.domain] = {
-      ...validated.next,
-      firstSeen: current?.firstSeen ?? now,
-      lastSeen: now,
+    let finished = false;
+    let committed = false;
+    const release = (): void => {
+      if (finished) return;
+      finished = true;
+      lock.release();
     };
-    writeAtomically(store);
-    return { ok: true };
-  });
+
+    return {
+      ok: true,
+      reservation: {
+        commit(): SavePinResult {
+          if (finished || committed) {
+            throw new PinStoreError("Trust-pin transaction is no longer active.");
+          }
+          const now = new Date().toISOString();
+          store[validated.domain] = {
+            ...validated.next,
+            firstSeen: current?.firstSeen ?? now,
+            lastSeen: now,
+          };
+          writeAtomically(store);
+          committed = true;
+          return { ok: true };
+        },
+        release,
+      },
+    };
+  } catch (error) {
+    lock.release();
+    throw error;
+  }
 }
 
 /** Preserve the old file as a backup, then create a valid empty v1 store. */
