@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 import type { Harness, TestModule } from "./harness.ts";
+import { CLI_CLAIM_BOUNDARY } from "../../dist/claims.js";
 
 function run(h: Harness): void {
   h.section("cli.ts — process integration (mocked DNS + fake npm)");
@@ -117,6 +118,10 @@ globalThis.fetch = async () => {
     "verify succeeds for valid mapping",
     verify.status === 0 &&
       (verify.stdout.includes("safe-package") || verify.stdout.includes("dnstall") || verify.stdout.length > 0),
+  );
+  h.check(
+    "verify states the declaration/safety boundary",
+    verify.stdout.includes(CLI_CLAIM_BOUNDARY),
   );
   h.check("verify does not install", !existsSync(marker));
 

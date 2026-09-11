@@ -32,9 +32,10 @@ Package names are easy to mistype, and unfamiliar scopes are hard to judge. A
 domain is often a clearer starting point: if you already trust `example.com`,
 you can ask what package that domain declares instead of guessing its npm name.
 
-That’s useful evidence — not a magic safety stamp. `domaininstall` proves that
-the current DNS record maps a domain to a package. It does **not** prove that
-the package code is safe.
+That’s useful evidence — not a magic safety stamp. `domaininstall` shows the
+package declared by the current resolved DNS record and checks that declaration
+against a local continuity pin after first use. It does **not** prove that the
+package code is safe or that the domain owner controls the npm publisher account.
 
 ## A quick tour
 

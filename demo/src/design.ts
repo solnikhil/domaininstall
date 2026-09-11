@@ -237,7 +237,7 @@ export const ink = {
   wash: "#f7f9fd",
 } as const;
 
-/** Accents. One meaning each: blue = the product, green = proven, red = wrong. */
+/** Accents. One meaning each: blue = the product, green = confirmed, red = mismatch. */
 export const hue = {
   blue: "#2f66ff",
   blueSoft: "#e8efff",

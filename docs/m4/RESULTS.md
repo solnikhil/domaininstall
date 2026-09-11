@@ -29,7 +29,7 @@ Gates 2, 3, and 5 inform severity and sequencing but the written decision rule s
 | 3 | Documentation placement | ≥3 real README / install-doc placements | Placements: ___ / 3 | | | |
 | 4 | Discovery correctness | ≥30 counterbalanced task-trials; treatment accuracy ≥90%; improvement ≥20 pp over control | Trials: ___ / 30<br>A_T: ___%<br>A_C: ___%<br>Δ: ___ pp | | | See § Gate 4 detail |
 | 5 | Usage | ≥10 external users; ≥25 successful uses; ≥5 repeat users | Users: ___ / 10<br>Uses: ___ / 25<br>Repeat: ___ / 5 | | | See § Gate 5 detail |
-| 6 | Comprehension | ≥80% pass critical item set (mapping ≠ package safety) | Completers: ___<br>Comprehend: ___<br>Rate: ___% | | | See § Gate 6 detail |
+| 6 | Comprehension | ≥80% pass critical item set (mapping ≠ package safety) | Completers: 0<br>Comprehend: 0<br>Rate: not calculated | Incomplete | 2026-08-23 | Revised exposure ready; no external cohort yet. See § Gate 6 detail |
 
 **Overall M4 status:** ☑ Not started · ☐ In progress · ☐ Complete — continue CLI · ☐ Complete — pivot · ☐ Incomplete (stopped early)
 
@@ -138,15 +138,34 @@ Protocol: [COMPREHENSION.md](./COMPREHENSION.md)
 
 | Metric | Threshold | Actual |
 | --- | --- | --- |
-| Completers (valid exposure) | ≥5 to decide; prefer ≥10 | |
-| Exposure type | README + verify/mock | live ___ / mock ___ |
-| Passed critical set (C1∧C2∧C3) | — | |
-| Comprehension rate | ≥80% | |
+| Completers (valid exposure) | ≥5 to decide; prefer ≥10 | 0 |
+| Exposure type | README + live/demo/mock claim exposure | live 0 / demo 0 / mock 0 |
+| Passed critical set (C1∧C2∧C3) | — | 0 |
+| Comprehension rate | ≥80% | Not calculated (empty denominator) |
 | Item miss rates (optional) | — | C1: · C2: · C3: · C4: · C5: · C6: · C7: |
 
-**Outcome:** ☐ Pass · ☐ Fail · ☐ Incomplete  
-**Date:**  
-**Doc fixes triggered:**  
+**Outcome:** ☐ Pass · ☐ Fail · ☑ Incomplete
+**Date:** 2026-08-23
+**Doc fixes triggered:** Replaced package-authenticity verdicts in the CLI/demo
+with declaration-continuity language; added a visible package-safety/publisher-
+identity boundary and an automated claim-copy regression gate.
+
+### Revised-copy rerun record
+
+| Field | Result |
+| --- | --- |
+| Exposure under test | Revised CLI help/verify copy and revised demo Verify panel |
+| Valid external completers | 0 |
+| Passed critical set | 0 |
+| Comprehension rate | Not calculated (empty denominator) |
+| Result | **Incomplete** — no human gate decision |
+| Automated QA | Claim snapshot/policy guard passes; excluded from participant evidence |
+
+No external participant cohort was available within the copy-change work. This
+entry deliberately records an incomplete rerun instead of fabricating human
+evidence or treating automated reviewers as participants. Recruit a new cohort,
+record the exact tested commit/version and exposure type, then append its C1–C7
+results here before changing Gate 6 status.
 
 ---
 
@@ -200,4 +219,5 @@ Select **one**:
 
 | Date | Change | Reason |
 | --- | --- | --- |
+| 2026-08-23 | Registered revised-copy Gate 6 exposure; recorded 0 valid completers and Incomplete | Product copy changed materially; a new uncoached human cohort is required |
 | | | |

@@ -17,6 +17,7 @@ import {
   type,
 } from "../design";
 import {Caret, Tick} from "../components/primitives";
+import {DEMO_CLAIM_COPY} from "../claim-copy";
 
 /*
  * Panel vocabulary: BROADCAST BOARD.
@@ -63,13 +64,13 @@ const QueryRings: React.FC<{frame: number}> = ({frame}) => (
 const FACTS = [
   {
     label: "dnssec",
-    value: "authenticated",
+    value: DEMO_CLAIM_COPY.verify.dnssecFact,
     color: hue.green,
     tick: true,
   },
   {
     label: "nothing installed",
-    value: "read-only lookup",
+    value: DEMO_CLAIM_COPY.verify.lookupFact,
     color: hue.blue,
     tick: false,
   },
@@ -187,8 +188,22 @@ export const Verify: React.FC<{frame: number}> = ({frame}) => {
             ...rise(verdict, 22, 5),
           }}
         >
-          Verified.
+          {DEMO_CLAIM_COPY.verify.verdict}
         </div>
+      </div>
+
+      <div
+        style={{
+          maxWidth: 1180,
+          fontFamily: sans,
+          fontSize: 24,
+          lineHeight: 1.35,
+          textAlign: "center",
+          color: ink[500],
+          ...rise(cue(frame, VERDICT_AT, 18), 16, 4),
+        }}
+      >
+        {DEMO_CLAIM_COPY.verify.boundary}
       </div>
     </AbsoluteFill>
   );
