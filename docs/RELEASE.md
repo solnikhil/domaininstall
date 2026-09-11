@@ -38,7 +38,9 @@ Before creating `v${RELEASE_VERSION}`:
    `npm-production`.
 7. Run `npm ci`, `npm test`, `npm run test:e2e`,
    `npm audit --omit=dev`, and `npm run verify:package` from the release commit.
-8. Confirm `git status --short` prints nothing.
+8. Run `npm run verify:docs` and confirm the documented command surface matches
+   the CLI built from the release commit.
+9. Confirm `git status --short` prints nothing.
 
 ## First publication only (historical)
 
@@ -105,6 +107,11 @@ Confirm that the registry version, Git tag commit, provenance subject, packed
 files, README, license, and all executable aliases match the tested artifact.
 Repeat the install and alias checks on Windows. Only then create the GitHub
 release from that same tag.
+
+After creating the GitHub release, verify that it is marked latest and that its
+README and changelog describe the same commands as the npm artifact. Documentation
+on `main` may describe the next release candidate, but released documentation
+must remain attached to its immutable tag.
 
 ## Rollback
 

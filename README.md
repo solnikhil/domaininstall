@@ -11,8 +11,10 @@ Here’s the idea: a domain owner publishes a small DNS record that points to an
 npm package. `domaininstall` reads that record, shows you exactly what it found,
 and asks before installing anything.
 
-> **Status:** available on npm as an early release. The command and DNS format
-> are intentionally small while real-world use shapes what comes next.
+> **Status:** available on npm as an early release. This `main`-branch README
+> documents the next release candidate; use the README attached to the
+> [latest GitHub release](https://github.com/solnikhil/domaininstall/releases/latest)
+> for the exact command surface in the currently published npm package.
 
 ## Install
 

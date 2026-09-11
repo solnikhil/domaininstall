@@ -167,8 +167,9 @@ A conforming v0 consumer:
 - clearly distinguishes declaration verification from package-safety claims.
 
 `di setup <domain> <package>[@range]` is the reference producer.
-`di verify <domain> --json` is the reference diagnostic consumer in the current
-unreleased source tree.
+`di verify <domain>` is the reference human-readable diagnostic consumer.
+Machine-readable resolution is a future proposal and is not part of the v0
+consumer interface or this specification.
 
 ## Evolution
 
