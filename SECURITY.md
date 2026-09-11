@@ -60,10 +60,10 @@ Trust-state hardening differs by OS:
 
 Please **don’t** publish exploit details in a public issue.
 
-Use GitHub’s **Report a vulnerability** flow when private reporting is enabled
-for the repository. If that option isn’t available, open a minimal issue asking
-the maintainer to set up a private contact channel — and leave out reproduction
-steps or sensitive details.
+Use GitHub’s [private **Report a vulnerability**
+flow](https://github.com/solnikhil/domaininstall/security/advisories/new). Private
+vulnerability reporting is enabled for this repository; do not put reproduction
+steps, exploit details, or other sensitive information in a public issue.
 
 Useful reports often cover things like:
 
