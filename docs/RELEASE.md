@@ -44,20 +44,10 @@ Before creating `v${RELEASE_VERSION}`:
 
 ## First publication only (historical)
 
-The first publication used `.github/workflows/publish-bootstrap.yml` because a
-trusted publisher can’t be attached until the package exists.
-
-1. Create a granular npm token limited to publishing `domaininstall`, with the
-   shortest practical expiry.
-2. Store it as the `NPM_PUBLISH_TOKEN` secret on the protected
-   `npm-production` environment.
-3. Tag the exact verified commit, push the tag, and wait for Live E2E.
-4. Manually run **Bootstrap npm publication** while selecting that tag.
-5. Verify the package, then immediately revoke the token and delete the secret.
-
-The workflow refuses branch refs, checks that the tag matches `package.json`,
-reruns deterministic tests / audit / package verification, and publishes with
-npm provenance.
+The first publication used a short-lived token because a trusted publisher
+couldn’t be attached until the package existed. That bootstrap path is retired:
+its workflow has been removed, and no supported release path accepts an npm
+publication token. Restore neither the workflow nor `NPM_PUBLISH_TOKEN`.
 
 ## Later trusted publications
 
@@ -72,13 +62,21 @@ In npm package settings, configure the GitHub trusted publisher for repository
    git push origin "v${RELEASE_VERSION}"
    ```
 
-2. Wait for the tag-triggered **Live E2E** workflow to pass.
-3. Manually run **Publish npm package** against the exact tag.
-4. Approve the protected `npm-production` deployment after verifying the tag
-   and workflow inputs.
+2. The tag push starts **Publish npm package**. In that same workflow run, the
+   release graph calls **Live E2E** at the exact tag SHA on Linux, macOS, and
+   Windows. The protected publish job does not become eligible for approval
+   unless all three jobs succeed. Missing, skipped, cancelled, or failed matrix
+   results therefore block publication; results from another SHA or an older
+   workflow run cannot satisfy the dependency.
+3. Approve the protected `npm-production` deployment after verifying the tag
+   and workflow inputs. A retry may be manually dispatched against the exact
+   tag; it runs the complete live E2E dependency again before approval.
 
-The workflow requests only `contents: read` and `id-token: write`. It does not
-use a reusable publish token.
+Release attempts for the same tag are serialized. The E2E call receives only
+`contents: read`; the publish job separately receives `contents: read` and
+`id-token: write` and does not use a reusable publish token. `npm test` enforces
+this dependency graph and fails if another publication workflow or bootstrap
+token path is added.
 
 ## Post-publication verification
 
