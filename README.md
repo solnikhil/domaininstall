@@ -2,10 +2,6 @@
 
 Install an npm package using a domain you already know.
 
-```text
-di verify zuraai.xyz
-di zuraai.xyz
-```
 
 Here’s the idea: a domain owner publishes a small DNS record that points to an
 npm package. `domaininstall` reads that record, shows you exactly what it found,
